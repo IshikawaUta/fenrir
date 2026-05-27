@@ -1,0 +1,331 @@
+import re
+from typing import Dict, Any, List, Tuple, Callable, Optional, Union, Type
+from fenrir.exceptions import HTTPMethodNotAllowed, HTTPNotFound
+
+CONVERTER_PATTERNS = {
+    "int": (r"\d+", int),
+    "float": (r"\d+(?:\.\d+)?", float),
+    "path": (r".+", str),
+    "str": (r"[^/]+", str),
+    "string": (r"[^/]+", str),
+}
+
+def compile_path(path_pattern: str) -> Tuple[re.Pattern, Dict[str, Callable]]:
+    segment_re = re.compile(r"<([^>]+)>")
+    parts = []
+    converters = {}
+    last_idx = 0
+    
+    for match in segment_re.finditer(path_pattern):
+        parts.append(re.escape(path_pattern[last_idx:match.start()]))
+        content = match.group(1)
+        subparts = content.split(":")
+        
+        converter_name = "str"
+        param_name = ""
+        pattern = r"[^/]+"
+        converter_fn = str
+        
+        if len(subparts) == 1:
+            param_name = subparts[0]
+        elif len(subparts) == 2:
+            p1, p2 = subparts[0].strip(), subparts[1].strip()
+            if p1 in CONVERTER_PATTERNS:
+                converter_name = p1
+                param_name = p2
+            elif p2 in CONVERTER_PATTERNS:
+                converter_name = p2
+                param_name = p1
+            else:
+                converter_name = "str"
+                param_name = p1
+        elif len(subparts) == 3:
+            p1, p2, p3 = subparts[0].strip(), subparts[1].strip(), subparts[2].strip()
+            if p1 == "re":
+                converter_name = "re"
+                pattern = p2
+                param_name = p3
+            elif p2 == "re":
+                converter_name = "re"
+                pattern = p3
+                param_name = p1
+            else:
+                param_name = p1
+                converter_name = "str"
+                
+        if converter_name in CONVERTER_PATTERNS:
+            pattern, converter_fn = CONVERTER_PATTERNS[converter_name]
+        elif converter_name == "re":
+            converter_fn = str
+            
+        parts.append(f"(?P<{param_name}>{pattern})")
+        converters[param_name] = converter_fn
+        last_idx = match.end()
+        
+    parts.append(re.escape(path_pattern[last_idx:]))
+    full_regex = re.compile("^" + "".join(parts) + "$")
+    return full_regex, converters
+
+
+class Route:
+    def __init__(
+        self,
+        path_pattern: str,
+        handler: Any,
+        methods: List[str] = None,
+        *,
+        response_model: Any = None,
+        response_model_include: Any = None,
+        response_model_exclude: Any = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        status_code: int = 200,
+        tags: List[str] = None,
+        summary: str = None,
+        description: str = None,
+        deprecated: bool = False,
+        responses: Dict[Any, Any] = None,
+        name: str = None,
+    ):
+        self.path_pattern = path_pattern
+        self.handler = handler
+        self.methods = [m.upper() for m in (methods or ["GET"])]
+        self.regex, self.converters = compile_path(path_pattern)
+        # OpenAPI / serialization metadata
+        self.response_model = response_model
+        self.response_model_include = response_model_include
+        self.response_model_exclude = response_model_exclude
+        self.response_model_exclude_unset = response_model_exclude_unset
+        self.response_model_exclude_defaults = response_model_exclude_defaults
+        self.status_code = status_code
+        self.tags = tags or []
+        self.summary = summary
+        self.description = description
+        self.deprecated = deprecated
+        self.responses = responses or {}
+        self.name = name or getattr(handler, "__name__", None)
+
+    def match(self, path: str) -> Optional[Dict[str, Any]]:
+        m = self.regex.match(path)
+        if not m:
+            return None
+        
+        params = {}
+        for name, val_str in m.groupdict().items():
+            converter = self.converters.get(name, str)
+            try:
+                params[name] = converter(val_str)
+            except ValueError:
+                return None  # Conversion failed, doesn't match this route
+        return params
+
+    def is_falcon_resource(self) -> bool:
+        """Check if the handler behaves like a Falcon resource class."""
+        # Falcon resources have methods like on_get, on_post, etc.
+        for attr in dir(self.handler):
+            if attr.startswith("on_") and callable(getattr(self.handler, attr)):
+                return True
+        return False
+
+    def get_resource_method(self, method: str) -> Optional[Callable]:
+        target_name = f"on_{method.lower()}"
+        if hasattr(self.handler, target_name):
+            return getattr(self.handler, target_name)
+        return None
+
+
+class Router:
+    def __init__(self, route_class: Optional[Type[Route]] = None):
+        self.routes: List[Route] = []
+        self.websocket_routes: List[Route] = []
+        self.route_class = route_class or Route
+        self.included_routers = []
+
+    def include_router(self, other: "Router", prefix: str = ""):
+        if other is self:
+            raise RuntimeError("Cannot include a router into itself")
+        
+        # Check for circular/recursive inclusion
+        def check_circular(r):
+            if r is self:
+                raise RuntimeError("Circular router inclusion detected")
+            for sub in getattr(r, "included_routers", []):
+                check_circular(sub)
+                
+        check_circular(other)
+        self.included_routers.append(other)
+        
+        for route in other.routes:
+            self.add_route(
+                prefix + route.path_pattern, route.handler, route.methods,
+                response_model=route.response_model,
+                response_model_include=route.response_model_include,
+                response_model_exclude=route.response_model_exclude,
+                response_model_exclude_unset=route.response_model_exclude_unset,
+                response_model_exclude_defaults=route.response_model_exclude_defaults,
+                status_code=route.status_code,
+                tags=route.tags,
+                summary=route.summary,
+                description=route.description,
+                deprecated=route.deprecated,
+                responses=route.responses,
+                name=route.name,
+            )
+        for route in other.websocket_routes:
+            self.add_websocket_route(prefix + route.path_pattern, route.handler)
+
+    def add_route(
+        self,
+        path_pattern: str,
+        handler: Any,
+        methods: List[str] = None,
+        **route_kwargs,
+    ):
+        if methods is None:
+            if hasattr(handler, "methods") and handler.methods:
+                methods = list(handler.methods)
+            else:
+                for attr in dir(handler):
+                    if attr.startswith("on_") and callable(getattr(handler, attr)):
+                        if methods is None:
+                            methods = []
+                        methods.append(attr[3:].upper())
+        
+        if not methods:
+            methods = ["GET"]
+
+        # RFC 7231: HEAD must be supported for any resource that supports GET
+        if "GET" in methods and "HEAD" not in methods:
+            methods = list(methods) + ["HEAD"]
+
+        provide_automatic_options = getattr(handler, "provide_automatic_options", None)
+        if provide_automatic_options is None:
+            provide_automatic_options = True
+        if provide_automatic_options and "OPTIONS" not in methods:
+            methods = list(methods) + ["OPTIONS"]
+
+        # Only pass kwargs that Route accepts
+        _route_meta_keys = {
+            "response_model", "response_model_include", "response_model_exclude",
+            "response_model_exclude_unset", "response_model_exclude_defaults",
+            "status_code", "tags", "summary", "description", "deprecated",
+            "responses", "name",
+        }
+        filtered_kwargs = {k: v for k, v in route_kwargs.items() if k in _route_meta_keys}
+
+        # Respect custom route classes that don't accept extra kwargs
+        import inspect as _inspect
+        try:
+            _init_sig = _inspect.signature(self.route_class.__init__)
+            _init_params = set(_init_sig.parameters.keys())
+            _has_var_kw = any(
+                p.kind == _inspect.Parameter.VAR_KEYWORD
+                for p in _init_sig.parameters.values()
+            )
+            if not _has_var_kw:
+                filtered_kwargs = {k: v for k, v in filtered_kwargs.items() if k in _init_params}
+        except (ValueError, TypeError):
+            pass
+
+        route = self.route_class(path_pattern, handler, methods, **filtered_kwargs)
+        self.routes.append(route)
+
+    def add_websocket_route(self, path_pattern: str, handler: Any):
+        route = self.route_class(path_pattern, handler, ["WEBSOCKET"])
+        self.websocket_routes.append(route)
+
+    def match(self, path: str, method: str) -> Tuple[Route, Dict[str, Any], Callable]:
+        method = method.upper()
+        # RFC 7231: HEAD is handled identically to GET (body stripped later)
+        effective_method = "GET" if method == "HEAD" else method
+        path_matched = False
+        allowed_methods = set()
+        
+        for route in self.routes:
+            params = route.match(path)
+            if params is not None:
+                path_matched = True
+                
+                # Check methods
+                if route.is_falcon_resource():
+                    resource_method = route.get_resource_method(effective_method)
+                    if resource_method:
+                        return route, params, resource_method
+                    # Also try original method for HEAD on Falcon resources
+                    if method != effective_method:
+                        resource_method = route.get_resource_method(method)
+                        if resource_method:
+                            return route, params, resource_method
+                    # Find all available on_* methods for this resource
+                    for attr in dir(route.handler):
+                        if attr.startswith("on_") and callable(getattr(route.handler, attr)):
+                            allowed_methods.add(attr[3:].upper())
+                else:
+                    if effective_method in route.methods or method in route.methods:
+                        return route, params, route.handler
+                    else:
+                        allowed_methods.update(route.methods)
+                        
+        if path_matched:
+            raise HTTPMethodNotAllowed(detail=f"Allowed methods: {', '.join(sorted(allowed_methods))}")
+        
+        raise HTTPNotFound(detail="No route matches the requested path.")
+
+    def match_websocket(self, path: str) -> Tuple[Route, Dict[str, Any], Callable]:
+        for route in self.websocket_routes:
+            params = route.match(path)
+            if params is not None:
+                return route, params, route.handler
+        raise HTTPNotFound(detail="No websocket route matches the requested path.")
+
+
+class APIRouter(Router):
+    def route(
+        self,
+        path: str,
+        methods: List[str] = None,
+        *,
+        response_model: Any = None,
+        status_code: int = 200,
+        tags: List[str] = None,
+        summary: str = None,
+        description: str = None,
+        deprecated: bool = False,
+        responses: Dict = None,
+        **kwargs,
+    ):
+        def decorator(handler):
+            self.add_route(
+                path, handler, methods,
+                response_model=response_model,
+                status_code=status_code,
+                tags=tags,
+                summary=summary,
+                description=description,
+                deprecated=deprecated,
+                responses=responses or {},
+                **kwargs,
+            )
+            return handler
+        return decorator
+
+    def get(self, path: str, **kwargs):
+        return self.route(path, ["GET"], **kwargs)
+
+    def post(self, path: str, **kwargs):
+        return self.route(path, ["POST"], **kwargs)
+
+    def put(self, path: str, **kwargs):
+        return self.route(path, ["PUT"], **kwargs)
+
+    def delete(self, path: str, **kwargs):
+        return self.route(path, ["DELETE"], **kwargs)
+
+    def patch(self, path: str, **kwargs):
+        return self.route(path, ["PATCH"], **kwargs)
+
+    def websocket(self, path: str):
+        def decorator(handler):
+            self.add_websocket_route(path, handler)
+            return handler
+        return decorator
