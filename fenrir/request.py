@@ -124,11 +124,26 @@ class Request:
                 else:
                     self._form[name] = value
 
+            # State dict shared by the interceptor closures.
+            # Needed because python-multipart < 0.0.21 did NOT store content_type
+            # on the File object; we grab it from the raw part headers instead.
+            _part_state: Dict[str, Any] = {
+                "content_type": "",
+                "header_name": [],
+                "header_value": [],
+                "part_headers": {},
+            }
+
             def on_file(file):
                 name = decode_bytes(file.field_name)
                 filename = decode_bytes(file.file_name)
-                raw_content_type = getattr(file, "content_type", None) or getattr(file, "_content_type", b"")
-                content_type_val = decode_bytes(raw_content_type)
+                # Prefer the native property; fall back to our intercepted value.
+                raw_ct = (
+                    getattr(file, "content_type", None)
+                    or getattr(file, "_content_type", None)
+                    or _part_state["content_type"]
+                )
+                content_type_val = decode_bytes(raw_ct)
                 file.file_object.seek(0)
                 upload_file = UploadFile(filename, file.file_object, content_type_val)
                 if name in self._form:
@@ -140,7 +155,55 @@ class Request:
                 else:
                     self._form[name] = upload_file
 
-            multipart.parse_form(headers, body_stream, on_field, on_file)
+            parser_inst = multipart.create_form_parser(headers, on_field, on_file)
+
+            # Wrap the underlying MultipartParser callbacks so we can intercept
+            # per-part headers before they are discarded by the library.
+            if hasattr(parser_inst, "parser") and hasattr(parser_inst.parser, "callbacks"):
+                orig_cb = parser_inst.parser.callbacks
+
+                def _hfield(data, start, end):
+                    _part_state["header_name"].append(data[start:end])
+                    if "on_header_field" in orig_cb:
+                        orig_cb["on_header_field"](data, start, end)
+
+                def _hvalue(data, start, end):
+                    _part_state["header_value"].append(data[start:end])
+                    if "on_header_value" in orig_cb:
+                        orig_cb["on_header_value"](data, start, end)
+
+                def _hend():
+                    name_b = b"".join(_part_state["header_name"]).lower()
+                    val_b = b"".join(_part_state["header_value"])
+                    _part_state["part_headers"][name_b] = val_b
+                    _part_state["header_name"].clear()
+                    _part_state["header_value"].clear()
+                    if "on_header_end" in orig_cb:
+                        orig_cb["on_header_end"]()
+
+                def _hfinished():
+                    ct_b = _part_state["part_headers"].get(b"content-type", b"")
+                    _part_state["content_type"] = ct_b.decode("latin-1")
+                    _part_state["part_headers"].clear()
+                    if "on_headers_finished" in orig_cb:
+                        orig_cb["on_headers_finished"]()
+
+                parser_inst.parser.callbacks = {
+                    **orig_cb,
+                    "on_header_field": _hfield,
+                    "on_header_value": _hvalue,
+                    "on_header_end": _hend,
+                    "on_headers_finished": _hfinished,
+                }
+
+            # Feed the full body to the parser.
+            chunk_size = 1 << 20  # 1 MiB
+            while True:
+                chunk = body_stream.read(chunk_size)
+                if not chunk:
+                    break
+                parser_inst.write(chunk)
+            parser_inst.finalize()
             
         elif "application/x-www-form-urlencoded" in content_type:
             parsed = urllib.parse.parse_qs(self._body.decode("utf-8", errors="replace"))

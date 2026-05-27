@@ -18,16 +18,28 @@ try:
 except ImportError:
     from typing_extensions import Annotated  # type: ignore[assignment]
 
+# get_origin / get_args: use typing_extensions so that Annotated from
+# typing_extensions is properly introspected on Python 3.8, where
+# typing.get_origin(typing_extensions.Annotated[...]) returns None.
+try:
+    from typing_extensions import get_origin, get_args
+except ImportError:
+    from typing import get_origin, get_args  # type: ignore[assignment]
 
-# asyncio.to_thread compatibility for Python 3.8
+# asyncio.to_thread compatibility for Python 3.8.
+# IMPORTANT: use contextvars.copy_context() so that ContextVar values
+# (request context, session, etc.) are visible inside the thread.
 if sys.version_info >= (3, 9):
     to_thread = asyncio.to_thread
 else:
+    import contextvars
     import functools
-    async def to_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+
+    async def to_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
         loop = asyncio.get_running_loop()
+        ctx = contextvars.copy_context()
         func_call = functools.partial(func, *args, **kwargs)
-        return await loop.run_in_executor(None, func_call)
+        return await loop.run_in_executor(None, ctx.run, func_call)
 
 
 
