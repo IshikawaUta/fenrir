@@ -1,7 +1,7 @@
 import inspect
 import re
-from typing import Any, Dict, List, get_args, get_origin
-from fenrir.compat import Annotated
+from typing import Any, Dict, List
+from fenrir.compat import Annotated, get_origin, get_args
 from pydantic import BaseModel
 from fenrir.routing import Route
 from fenrir.dependencies import ParamInfo, Header, Cookie, Query, Body, Path, Depends
