@@ -4,14 +4,34 @@
 
 # Fenrir Web Framework
 
+[![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-482%20Passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-482%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
 **Fenrir** is a state-of-the-art, high-performance, hybrid Python web framework built on top of modern ASGI specifications. It elegantly merges the best programming paradigms from Python's most popular web frameworks (**Flask**, **FastAPI**, **Sanic**, **Falcon**, and **Bottle**) into a single unified workspace, powered locally by the premium **Asteri v2.2.2** application server.
 
 Whether you prefer the automatic Pydantic validation of FastAPI, the seamless context-locals of Flask, the raw class-based speed of Falcon, or the robust background task model of Sanic, **Fenrir** allows you to leverage them all simultaneously in the same codebase.
+
+---
+
+## 📦 Installation
+
+Install directly from **PyPI**:
+
+```bash
+pip install fenrir-framework
+```
+
+Or install in development mode by cloning the repository:
+
+```bash
+git clone https://github.com/IshikawaUta/fenrir.git
+cd fenrir
+pip install -e .
+```
 
 ---
 
@@ -27,22 +47,7 @@ Whether you prefer the automatic Pydantic validation of FastAPI, the seamless co
 *   **📖 Auto-Generated OpenAPI Docs**: Interactive **Swagger UI** (`/docs`) and **ReDoc** (`/redoc`) instantly generated from your Pydantic schemas and route metadata.
 *   **🔌 Modern Communications**: Out-of-the-box support for **WebSockets** and **Server-Sent Events (SSE)**.
 *   **🛠️ Premium CLI Tooling**: Visual route tables, interactive app shell, in-memory benchmarking suite, project scaffolding, and environment system inspection.
-
----
-
-## 📦 Installation
-
-To install Fenrir in development mode, clone the repository and run:
-
-```bash
-pip install -e .
-```
-
-To install all optimal development and testing dependencies:
-
-```bash
-pip install pytest httpx watchdog pydantic jinja2 asteri>=2.2.2
-```
+*   **🐍 Python 3.8+ Compatible**: Full backward compatibility ensured via `typing_extensions` fallback for `Annotated`.
 
 ---
 
@@ -63,7 +68,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="1.0.0")
+app = Fenrir(title="Fenrir Hybrid Demo", version="1.1.1")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -127,19 +132,6 @@ Print a beautiful, colorized structural table of all registered HTTP endpoints, 
 ```bash
 fenrir routes demo_app:app
 ```
-**Output Example:**
-```text
-----------------------------------------------------------------
-Path                  Methods        Handler           Blueprint
-----------------------------------------------------------------
-/openapi.json         GET, OPTIONS   openapi_endpoint  -        
-/docs                 GET, OPTIONS   swagger_ui        -        
-/                     GET, OPTIONS   home              -        
-/items/<item_id:int>  GET, POST      ItemResource      -        
-/api/register         OPTIONS, POST  register_user     api      
-/ws/chat              WEBSOCKET      chat_ws           -        
-----------------------------------------------------------------
-```
 
 ### 3. `fenrir shell`
 Instantly spawn an interactive python shell pre-configured with all key framework classes and context loaded (`app`, `request`, `g`, `Response`, `Blueprint`, etc.).
@@ -154,9 +146,11 @@ fenrir bench demo_app:app -i 1000 -t 5 -p / -m GET
 ```
 
 ### 5. `fenrir new`
-Scaffold a complete, cleanly structured template of a new Fenrir project directory in seconds.
+Scaffold a complete, cleanly structured new Fenrir project directory in seconds with a premium responsive UI out of the box.
 ```bash
 fenrir new my_new_project
+cd my_new_project
+fenrir run app.py --dev
 ```
 
 ### 6. `fenrir info`
@@ -169,32 +163,39 @@ fenrir info demo_app:app
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **478 tests** validating every single component, compat namespace, file upload, routing detail, and CLI functionality.
+Fenrir is thoroughly covered by an automated test suite comprising **482 tests** validating every single component, compat namespace, file upload, routing detail, and CLI functionality. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
-Run the test suite using `pytest`:
+Run the test suite locally:
 
 ```bash
-pytest -v
+PYTHONPATH=. pytest -v
 ```
 
 ### Output:
 ```text
-======================== 477 passed, 1 skipped in 3.48s ========================
+======================== 482 passed, 1 skipped in 3.4s ========================
 ```
 
 ---
 
-## 🛠️ Package Distribution (PyPI Publish Ready)
+## 🔄 Changelog
 
-Fenrir is packed and ready for distribution.
-1. Build the distribution binaries:
-   ```bash
-   python -m build
-   ```
-2. Upload to PyPI using twine:
-   ```bash
-   python -m twine upload dist/*
-   ```
+### v1.1.1 — Python 3.8 Compatibility Fix
+- Fixed `ImportError: cannot import name 'Annotated' from 'typing'` on Python 3.8 by adding a `typing_extensions` fallback in `fenrir/compat.py`.
+- Added `typing_extensions>=4.0.0` as a core package dependency.
+
+### v1.1.0 — CI/CD & Centering Fix
+- Added **GitHub Actions** workflow for automated testing across Python 3.8–3.13.
+- Fixed centering of `PROJECT CREATED SUCCESSFULLY` badge and logo in scaffolded template.
+- Added **RFC 7231 HEAD** method compliance.
+- Added `itsdangerous` and `python-multipart` as explicit core dependencies.
+
+### v0.1.0 — Initial Release
+- Core ASGI framework with Flask, FastAPI, Sanic, Falcon, and Bottle hybridization.
+- 482 automated unit tests.
+- Premium CLI tooling (`run`, `routes`, `shell`, `bench`, `new`, `info`).
+- Auto-generated OpenAPI/Swagger documentation.
+- WebSocket and Server-Sent Events support.
 
 ---
 

@@ -13,6 +13,11 @@ import io
 import sys
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+try:
+    from typing import Annotated
+except ImportError:
+    from typing_extensions import Annotated  # type: ignore[assignment]
+
 
 class WsgiToAsgi:
     """Wrap a WSGI application to run inside an ASGI server.

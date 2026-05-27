@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fenrir-framework"
-version = "1.1.0"
+version = "1.1.1"
 description = "A hybrid Python web framework combining Flask, FastAPI, Bottle, Falcon, and Sanic"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -13,7 +13,8 @@ dependencies = [
     "jinja2>=3.0.0",
     "asteri>=2.2.2",
     "itsdangerous>=2.0.0",
-    "python-multipart>=0.0.18"
+    "python-multipart>=0.0.18",
+    "typing_extensions>=4.0.0"
 ]
 
 [project.scripts]

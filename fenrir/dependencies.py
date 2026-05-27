@@ -1,6 +1,7 @@
 import inspect
 import asyncio
-from typing import Annotated, Any, Callable, Dict, Optional, Type, List, Union, cast, get_args, get_origin
+from typing import Any, Callable, Dict, Optional, Type, List, Union, cast, get_args, get_origin
+from fenrir.compat import Annotated
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from fenrir.exceptions import HTTPUnprocessableEntity
 from fenrir.request import Request
