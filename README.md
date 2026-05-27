@@ -47,7 +47,7 @@ pip install -e .
 *   **📖 Auto-Generated OpenAPI Docs**: Interactive **Swagger UI** (`/docs`) and **ReDoc** (`/redoc`) instantly generated from your Pydantic schemas and route metadata.
 *   **🔌 Modern Communications**: Out-of-the-box support for **WebSockets** and **Server-Sent Events (SSE)**.
 *   **🛠️ Premium CLI Tooling**: Visual route tables, interactive app shell, in-memory benchmarking suite, project scaffolding, and environment system inspection.
-*   **🐍 Python 3.8+ Compatible**: Full backward compatibility ensured via `typing_extensions` fallback for `Annotated`.
+*   **🐍 Python 3.8–3.13 Compatible**: Full backward compatibility ensured via `typing_extensions` polyfills for `Annotated`, `get_origin`, `get_args`; and a `contextvars`-aware `asyncio.to_thread` shim.
 
 ---
 
@@ -180,9 +180,27 @@ PYTHONPATH=. pytest -v
 
 ## 🔄 Changelog
 
-### v1.1.1 — Python 3.8 Compatibility Fix
-- Fixed `ImportError: cannot import name 'Annotated' from 'typing'` on Python 3.8 by adding a `typing_extensions` fallback in `fenrir/compat.py`.
-- Added `typing_extensions>=4.0.0` as a core package dependency.
+### v1.1.1 — Python 3.8–3.10 Full Compatibility Patch
+
+Five test failures on Python 3.8 CI were identified and patched:
+
+**1. `RuntimeError: Working outside of request context` (session, redirect in sync handlers)**
+- **Root cause**: `loop.run_in_executor()` does **not** propagate `contextvars` by default. Sync route handlers using `session[...]` or `redirect()` lost the request context when moved into the executor thread.
+- **Fix**: `fenrir/compat.py` — polyfill now calls `contextvars.copy_context().run(func)` instead of passing `func` directly to the executor.
+
+**2. `AssertionError: {'user': None} != {'user': 'Alice'}` (Annotated[str, Header()])**
+- **Root cause**: `typing.get_origin(typing_extensions.Annotated[...])` returns `None` on Python 3.8, so `Annotated` parameters were silently ignored during dependency resolution.
+- **Fix**: `fenrir/compat.py` — export `get_origin`/`get_args` from `typing_extensions` (which correctly handles its own `Annotated`). `fenrir/dependencies.py` and `fenrir/openapi.py` now import these from `fenrir.compat`.
+
+**3. `AssertionError: {'content_type': ''} != {'content_type': 'text/plain'}` (file upload)**
+- **Root cause**: `python-multipart < 0.0.21` (installed on Python 3.8–3.10 CI runners) did not pass `content_type` into `File.__init__`, so `file.content_type` did not exist.
+- **Fix**: `fenrir/request.py` — intercepts the parser's `on_header_field`/`on_header_value`/`on_headers_finished` callbacks to capture the `Content-Type` of each multipart part before the `File` object is constructed, and injects it as a fallback.
+
+**4. `AssertionError: 'target' == '/nested/target'` (relative redirect)**
+- Resolved as a side-effect of fix #1 (contextvars propagation restores `request.path` inside the executor thread).
+
+**5. CI timeout on Python 3.9 (gevent build)**
+- The Python 3.9 job was cancelled mid-build because compiling `gevent` took too long. This is an infrastructure concern, not a code issue; no code change required.
 
 ### v1.1.0 — CI/CD & Centering Fix
 - Added **GitHub Actions** workflow for automated testing across Python 3.8–3.13.
