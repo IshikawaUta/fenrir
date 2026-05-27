@@ -24,6 +24,7 @@ import asyncio
 import inspect
 import logging
 from typing import Any, Callable, List
+from fenrir.compat import to_thread
 
 logger = logging.getLogger("fenrir.background")
 
@@ -41,7 +42,7 @@ class BackgroundTask:
             if inspect.iscoroutinefunction(self.func):
                 await self.func(*self.args, **self.kwargs)
             else:
-                await asyncio.to_thread(self.func, *self.args, **self.kwargs)
+                await to_thread(self.func, *self.args, **self.kwargs)
         except Exception:
             logger.exception("Error in background task %r", self.func)
 

@@ -127,7 +127,8 @@ class Request:
             def on_file(file):
                 name = decode_bytes(file.field_name)
                 filename = decode_bytes(file.file_name)
-                content_type_val = decode_bytes(file.content_type)
+                raw_content_type = getattr(file, "content_type", None) or getattr(file, "_content_type", b"")
+                content_type_val = decode_bytes(raw_content_type)
                 file.file_object.seek(0)
                 upload_file = UploadFile(filename, file.file_object, content_type_val)
                 if name in self._form:

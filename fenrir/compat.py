@@ -19,6 +19,18 @@ except ImportError:
     from typing_extensions import Annotated  # type: ignore[assignment]
 
 
+# asyncio.to_thread compatibility for Python 3.8
+if sys.version_info >= (3, 9):
+    to_thread = asyncio.to_thread
+else:
+    import functools
+    async def to_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        loop = asyncio.get_running_loop()
+        func_call = functools.partial(func, *args, **kwargs)
+        return await loop.run_in_executor(None, func_call)
+
+
+
 class WsgiToAsgi:
     """Wrap a WSGI application to run inside an ASGI server.
 

@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import logging
 from typing import Any, Callable, Dict, List, Optional, Type, Union
+from fenrir.compat import to_thread
 from fenrir.request import Request
 from fenrir.response import Response, JSONResponse, HTMLResponse, StreamingResponse
 from fenrir.routing import Router, Route
@@ -673,7 +674,7 @@ class Fenrir:
         if inspect.iscoroutinefunction(func):
             return await func(*args, **kwargs)
         else:
-            return await asyncio.to_thread(func, *args, **kwargs)
+            return await to_thread(func, *args, **kwargs)
 
     def _apply_response_model(self, route: Route, content: Any) -> Response:
         """Serialise *content* through the route's response_model if defined."""

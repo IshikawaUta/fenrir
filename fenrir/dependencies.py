@@ -1,7 +1,7 @@
 import inspect
 import asyncio
 from typing import Any, Callable, Dict, Optional, Type, List, Union, cast, get_args, get_origin
-from fenrir.compat import Annotated
+from fenrir.compat import Annotated, to_thread
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from fenrir.exceptions import HTTPUnprocessableEntity
 from fenrir.request import Request
@@ -208,7 +208,7 @@ async def resolve_parameters(
                     if is_coroutine_fn:
                         dep_val = await cast(Any, dep_func(**dep_kwargs))
                     else:
-                        dep_val = await asyncio.to_thread(dep_func, **dep_kwargs)
+                        dep_val = await to_thread(dep_func, **dep_kwargs)
                         
                 if use_cache:
                     req_obj._dependency_cache[dep_func] = dep_val
