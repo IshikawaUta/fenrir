@@ -365,7 +365,7 @@ def cmd_new(args):
 import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="1.1.1")
+app = Fenrir(title="My Fenrir Application", version="1.2.1")
 
 @app.get("/")
 async def home():
@@ -672,7 +672,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v1.1.1</span>
+                <span class="info-value">Fenrir v1.2.1</span>
             </div>
         </div>
 
