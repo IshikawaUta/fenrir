@@ -142,7 +142,7 @@ class Fenrir:
             "SESSION_COOKIE_DOMAIN": None,
             "SESSION_COOKIE_PATH": "/",
             "SESSION_COOKIE_HTTPONLY": True,
-            "SESSION_COOKIE_SECURE": False,
+            "SESSION_COOKIE_SECURE": True,
             "SESSION_COOKIE_SAMESITE": None,
         })
 
@@ -508,7 +508,8 @@ class Fenrir:
                 _ = req.host
                 # 2. Match Route
                 route, path_params, handler_func = self.router.match(req.path, req.method)
-                
+                req.path_params = path_params
+
                 # set blueprint name on request
                 active_bp = self._route_blueprints.get(route)
                 if active_bp:

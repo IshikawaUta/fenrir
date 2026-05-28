@@ -9,6 +9,7 @@ def anyio_backend():
 def app():
     app = Fenrir(title="TestApp")
     app.config["SECRET_KEY"] = "test-secret"
+    app.config["SESSION_COOKIE_SECURE"] = False
     return app
 
 @pytest.fixture

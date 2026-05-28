@@ -343,15 +343,25 @@ def cmd_new(args):
         os.makedirs(os.path.join(project_dir, "templates"), exist_ok=True)
         
         # Copy logo.png and create favicon.ico from logo.jpg (if it exists)
-        core_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        core_logo_path = os.path.join(core_dir, "logo.png")
+        # First try from fenrir package directory (for installed packages)
+        fenrir_dir = os.path.dirname(os.path.abspath(__file__))
+        core_logo_path = os.path.join(fenrir_dir, "logo.png")
+        
+        # Fallback to parent directory if not in fenrir folder (for dev mode)
+        if not os.path.exists(core_logo_path):
+            core_logo_path = os.path.join(os.path.dirname(fenrir_dir), "logo.png")
+        
+        # Last fallback to current working directory
         if not os.path.exists(core_logo_path):
             core_logo_path = os.path.join(os.getcwd(), "logo.png")
             
         if os.path.exists(core_logo_path):
             shutil.copy(core_logo_path, os.path.join(project_dir, "logo.png"))
 
-        core_jpg_path = os.path.join(core_dir, "logo.jpg")
+        core_jpg_path = os.path.join(fenrir_dir, "logo.jpg")
+        if not os.path.exists(core_jpg_path):
+            core_jpg_path = os.path.join(os.path.dirname(fenrir_dir), "logo.jpg")
+        
         if not os.path.exists(core_jpg_path):
             core_jpg_path = os.path.join(os.getcwd(), "logo.jpg")
 

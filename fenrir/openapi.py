@@ -289,7 +289,7 @@ def get_redoc_html(openapi_url: str = "/openapi.json", title: str = "Fenrir ReDo
 </head>
 <body>
     <redoc spec-url="{openapi_url}"></redoc>
-    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"> </script>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"> </script>
 </body>
 </html>
 """

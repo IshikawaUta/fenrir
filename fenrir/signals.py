@@ -1,6 +1,17 @@
 import inspect
 import asyncio
+import logging
 from typing import Any, Callable, List, Tuple
+
+logger = logging.getLogger("fenrir.signals")
+
+def _handle_signal_error(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Unhandled exception in async signal receiver")
 
 class Namespace(dict):
     def signal(self, name: str, doc: str = None) -> "Signal":
@@ -30,7 +41,8 @@ class Signal:
                 if inspect.iscoroutinefunction(receiver):
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(receiver(sender, **kwargs))
+                        task = loop.create_task(receiver(sender, **kwargs))
+                        task.add_done_callback(_handle_signal_error)
                     except RuntimeError:
                         asyncio.run(receiver(sender, **kwargs))
                 else:

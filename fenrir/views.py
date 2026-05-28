@@ -72,13 +72,7 @@ class MethodView(View):
             except LookupError:
                 app = getattr(sys, "_fenrir_active_app", None)
 
-            path_params = {}
-            if app is not None:
-                try:
-                    _route, matched_params, _handler = app.router.match(req.path, req.method)
-                    path_params = matched_params
-                except Exception:
-                    pass
+            path_params = getattr(req, "path_params", {})
 
             from fenrir.response import Response as _Resp
             resp = _Resp()

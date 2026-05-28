@@ -22,3 +22,6 @@ fenrir = "fenrir.cli:main"
 
 [tool.setuptools]
 packages = ["fenrir"]
+
+[tool.setuptools.package-data]
+fenrir = ["logo.png", "logo.jpg"]
