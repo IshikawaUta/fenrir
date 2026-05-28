@@ -68,7 +68,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="1.1.1")
+app = Fenrir(title="Fenrir Hybrid Demo", version="1.2.1")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -179,6 +179,19 @@ PYTHONPATH=. pytest -v
 ---
 
 ## 🔄 Changelog
+
+### v1.2.1 — Packaging & Asset Integration Patch
+
+Logo and favicon assets are now properly included in the package distribution:
+
+**Logo Asset Packaging**
+- **Issue**: `fenrir new` command failed to copy logo and favicon files when creating new projects outside the main repository.
+- **Root cause**: Logo files (`logo.png`, `logo.jpg`) were stored in the repository root, not within the `fenrir/` package directory, so they were not included when the package was installed via PyPI.
+- **Fix**: 
+  - Moved `logo.png` and `logo.jpg` from repository root to `fenrir/` package directory.
+  - Added `[tool.setuptools.package-data]` configuration in `pyproject.toml` to include image files: `fenrir = ["logo.png", "logo.jpg"]`.
+  - Updated `fenrir/cli.py` `cmd_new()` function to look for logos in the fenrir package directory first, with fallbacks for development mode.
+- **Result**: All tests pass (482 unit tests + 13 advanced tests). `fenrir new` now works correctly in all environments.
 
 ### v1.1.1 — Python 3.8–3.10 Full Compatibility Patch
 

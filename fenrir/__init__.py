@@ -54,7 +54,7 @@ from fenrir.testing import TestClient, FenrirTestClient
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "1.1.1"
+__version__ = "1.2.1"
 __all__ = [
     # Core app
     "Fenrir",
