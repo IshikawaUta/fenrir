@@ -92,7 +92,7 @@ class Fenrir:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "1.2.1",
+        version: str = "1.2.2",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",

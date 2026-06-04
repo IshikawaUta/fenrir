@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.jpg" alt="Fenrir Logo" width="400px"/>
+  <img src="https://raw.githubusercontent.com/IshikawaUta/fenrir/refs/heads/main/logo.jpg" alt="Fenrir Logo" width="500px"/>
 </p>
 
 # Fenrir Web Framework
@@ -68,7 +68,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="1.2.1")
+app = Fenrir(title="Fenrir Hybrid Demo", version="1.2.2")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -179,6 +179,13 @@ PYTHONPATH=. pytest -v
 ---
 
 ## 🔄 Changelog
+
+### v1.2.2 — Logo & Favicon Patch
+
+High-quality logo assets and resolved CLI template favicon issues:
+
+- **High-Resolution Logo**: Updated `logo.png` asset to a high-fidelity image for sharper rendering in documentation and templates.
+- **Favicon Resolution**: Ensured favicon is correctly rendered and copied during project scaffolding (`fenrir new`) from the package assets.
 
 ### v1.2.1 — Packaging & Asset Integration Patch
 
