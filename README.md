@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-482%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-528%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -68,7 +68,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="1.2.2")
+app = Fenrir(title="Fenrir Hybrid Demo", version="2.2.2")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -163,7 +163,7 @@ fenrir info demo_app:app
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **482 tests** validating every single component, compat namespace, file upload, routing detail, and CLI functionality. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **528 tests** validating every single component, compat namespace, file upload, routing detail, and CLI functionality. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -173,12 +173,39 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-======================== 482 passed, 1 skipped in 3.4s ========================
+======================= 528 passed, 1 skipped in 3.4s ========================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v2.2.2 — Major Feature Update
+
+New middleware, session backends, pagination, and more:
+
+**New Middleware (`fenrir.middleware`)**
+- **CORSMiddleware**: Full CORS support for HTTP and WebSocket with configurable origins, methods, headers, credentials, and max-age.
+- **GZipMiddleware**: Automatic gzip compression for responses above a configurable size threshold.
+- **RequestIDMiddleware**: Auto-generates unique request IDs or forwards client-provided IDs via configurable header.
+- **RateLimitMiddleware**: Sliding-window rate limiter per client IP with configurable limits and block status code.
+
+**New Session Backends (`fenrir.sessions`)**
+- **InMemorySessionInterface**: In-memory session storage with TTL expiration, suitable for single-process apps and testing.
+- **RedisSessionInterface**: Redis-backed session storage with support for both sync (`fakeredis`) and async (`redis.asyncio`) clients. Install with `pip install fenrir-framework[redis]`.
+
+**New Pagination Utilities (`fenrir.pagination`)**
+- **PaginationParams**: Pydantic model for query parameters (`page`, `page_size`, `sort_by`, `sort_order`).
+- **paginate()**: Utility to paginate SQLAlchemy-style query results with metadata.
+- **paginate_dict()**: Utility to paginate lists of dictionaries.
+
+**New Features**
+- **WebSocket per-route timeout**: `@app.websocket("/ws", timeout=5.0)` raises `WebSocketTimeout` if no message received within the timeout.
+- **Multiple response models per status**: `response_models={200: SuccessModel, 404: ErrorModel}` applies different models based on the actual response status code.
+
+**Improvements**
+- ASGI middleware stack is now built once and cached, with automatic invalidation when new middleware is added.
+- Zero deprecation warnings across the entire test suite (528 tests).
 
 ### v1.2.2 — Logo & Favicon Patch
 
@@ -198,7 +225,7 @@ Logo and favicon assets are now properly included in the package distribution:
   - Moved `logo.png` and `logo.jpg` from repository root to `fenrir/` package directory.
   - Added `[tool.setuptools.package-data]` configuration in `pyproject.toml` to include image files: `fenrir = ["logo.png", "logo.jpg"]`.
   - Updated `fenrir/cli.py` `cmd_new()` function to look for logos in the fenrir package directory first, with fallbacks for development mode.
-- **Result**: All tests pass (482 unit tests + 13 advanced tests). `fenrir new` now works correctly in all environments.
+- **Result**: All tests pass (528 unit tests). `fenrir new` now works correctly in all environments.
 
 ### v1.1.1 — Python 3.8–3.10 Full Compatibility Patch
 
@@ -230,7 +257,7 @@ Five test failures on Python 3.8 CI were identified and patched:
 
 ### v0.1.0 — Initial Release
 - Core ASGI framework with Flask, FastAPI, Sanic, Falcon, and Bottle hybridization.
-- 482 automated unit tests.
+- 528 automated unit tests.
 - Premium CLI tooling (`run`, `routes`, `shell`, `bench`, `new`, `info`).
 - Auto-generated OpenAPI/Swagger documentation.
 - WebSocket and Server-Sent Events support.

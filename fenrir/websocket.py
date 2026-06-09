@@ -1,4 +1,8 @@
-from typing import Any, Dict
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Dict, Optional
+
 
 class WebSocketDisconnect(Exception):
     def __init__(self, code: int = 1000, reason: str = ""):
@@ -6,12 +10,26 @@ class WebSocketDisconnect(Exception):
         self.reason = reason
 
 
+class WebSocketTimeout(Exception):
+    """Raised when a WebSocket receive operation times out."""
+    def __init__(self, timeout: float):
+        self.timeout = timeout
+        super().__init__(f"WebSocket receive timed out after {timeout}s")
+
+
 class WebSocket:
-    def __init__(self, scope: Dict[str, Any], receive: Any, send: Any):
+    def __init__(
+        self,
+        scope: Dict[str, Any],
+        receive: Any,
+        send: Any,
+        timeout: Optional[float] = None,
+    ):
         self.scope = scope
         self._receive = receive
         self._send = send
         self.client_state = "CONNECTING"  # CONNECTING, CONNECTED, DISCONNECTED
+        self._timeout = timeout
 
     async def accept(self, subprotocol: str = None, headers: list = None):
         if self.client_state != "CONNECTING":
@@ -27,8 +45,16 @@ class WebSocket:
         await self._send(message_accept)
         self.client_state = "CONNECTED"
 
+    async def _receive_with_timeout(self) -> Dict[str, Any]:
+        if self._timeout is not None:
+            try:
+                return await asyncio.wait_for(self._receive(), timeout=self._timeout)
+            except asyncio.TimeoutError:
+                raise WebSocketTimeout(self._timeout)
+        return await self._receive()
+
     async def receive(self) -> Dict[str, Any]:
-        message = await self._receive()
+        message = await self._receive_with_timeout()
         if message["type"] == "websocket.disconnect":
             self.client_state = "DISCONNECTED"
             raise WebSocketDisconnect(code=message.get("code", 1000))

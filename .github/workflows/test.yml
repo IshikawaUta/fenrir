@@ -25,11 +25,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # We need setuptools and wheel to build/install
         pip install setuptools wheel
         pip install .
-        # Install test dependencies
-        pip install pytest httpx anyio typeguard Mako falcon sanic
+        pip install pytest httpx anyio typeguard Mako falcon sanic fakeredis
 
     - name: Run tests
       run: |

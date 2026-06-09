@@ -2,7 +2,7 @@ from fenrir.app import Fenrir, Blueprint
 from fenrir.context import request, g, current_app, session
 from fenrir.dependencies import Depends, Query, Header, Cookie, Body, Path, Form, File
 from fenrir.upload import UploadFile
-from fenrir.websocket import WebSocket, WebSocketDisconnect
+from fenrir.websocket import WebSocket, WebSocketDisconnect, WebSocketTimeout
 from fenrir.exceptions import (
     HTTPException,
     HTTPBadRequest,
@@ -47,14 +47,25 @@ import fenrir.bottle as bottle
 import fenrir.falcon as falcon
 import fenrir.sanic as sanic
 from fenrir.testing import TestClient, FenrirTestClient
-
-
+from fenrir.middleware import (
+    CORSMiddleware,
+    GZipMiddleware,
+    RequestIDMiddleware,
+    RateLimitMiddleware,
+)
+from fenrir.pagination import PaginationParams, paginate, paginate_dict
+from fenrir.sessions import (
+    RedisSessionInterface,
+    InMemorySessionInterface,
+    InMemorySessionBackend,
+    ServerSideSession,
+)
 
 
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "1.2.2"
+__version__ = "2.2.2"
 __all__ = [
     # Core app
     "Fenrir",
@@ -79,6 +90,7 @@ __all__ = [
     # WebSocket
     "WebSocket",
     "WebSocketDisconnect",
+    "WebSocketTimeout",
     # Exceptions
     "HTTPException",
     "HTTPBadRequest",
@@ -144,5 +156,19 @@ __all__ = [
     # Testing
     "TestClient",
     "FenrirTestClient",
+    # Middleware
+    "CORSMiddleware",
+    "GZipMiddleware",
+    "RequestIDMiddleware",
+    "RateLimitMiddleware",
+    # Pagination
+    "PaginationParams",
+    "paginate",
+    "paginate_dict",
+    # Server-side sessions
+    "RedisSessionInterface",
+    "InMemorySessionInterface",
+    "InMemorySessionBackend",
+    "ServerSideSession",
 ]
 

@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any, List, Tuple, Callable, Optional, Union, Type
+from typing import Dict, Any, List, Tuple, Callable, Optional, Type
 from fenrir.exceptions import HTTPMethodNotAllowed, HTTPNotFound
 
 CONVERTER_PATTERNS = {
@@ -86,6 +86,8 @@ class Route:
         deprecated: bool = False,
         responses: Dict[Any, Any] = None,
         name: str = None,
+        response_models: Dict[int, Any] = None,
+        ws_timeout: float = None,
     ):
         self.path_pattern = path_pattern
         self.handler = handler
@@ -104,6 +106,10 @@ class Route:
         self.deprecated = deprecated
         self.responses = responses or {}
         self.name = name or getattr(handler, "__name__", None)
+        # Multiple response models: {status_code: model_class}
+        self.response_models = response_models or {}
+        # WebSocket per-route timeout (seconds)
+        self.ws_timeout = ws_timeout
 
     def match(self, path: str) -> Optional[Dict[str, Any]]:
         m = self.regex.match(path)
@@ -170,9 +176,14 @@ class Router:
                 deprecated=route.deprecated,
                 responses=route.responses,
                 name=route.name,
+                response_models=route.response_models,
+                ws_timeout=route.ws_timeout,
             )
         for route in other.websocket_routes:
-            self.add_websocket_route(prefix + route.path_pattern, route.handler)
+            self.add_websocket_route(
+                prefix + route.path_pattern, route.handler,
+                ws_timeout=route.ws_timeout,
+            )
 
     def add_route(
         self,
@@ -209,7 +220,7 @@ class Router:
             "response_model", "response_model_include", "response_model_exclude",
             "response_model_exclude_unset", "response_model_exclude_defaults",
             "status_code", "tags", "summary", "description", "deprecated",
-            "responses", "name",
+            "responses", "name", "response_models", "ws_timeout",
         }
         filtered_kwargs = {k: v for k, v in route_kwargs.items() if k in _route_meta_keys}
 
@@ -230,8 +241,8 @@ class Router:
         route = self.route_class(path_pattern, handler, methods, **filtered_kwargs)
         self.routes.append(route)
 
-    def add_websocket_route(self, path_pattern: str, handler: Any):
-        route = self.route_class(path_pattern, handler, ["WEBSOCKET"])
+    def add_websocket_route(self, path_pattern: str, handler: Any, ws_timeout: float = None):
+        route = self.route_class(path_pattern, handler, ["WEBSOCKET"], ws_timeout=ws_timeout)
         self.websocket_routes.append(route)
 
     def match(self, path: str, method: str) -> Tuple[Route, Dict[str, Any], Callable]:

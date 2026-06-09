@@ -92,7 +92,7 @@ class Fenrir:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "1.2.2",
+        version: str = "2.2.2",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",
@@ -168,6 +168,7 @@ class Fenrir:
         self.router = Router(route_class=route_class)
         self.middlewares: Dict[str, List[Callable]] = {"request": [], "response": []}
         self._asgi_middlewares: List = []   # ASGI-style middleware stack
+        self._asgi_app: Any = None          # Built middleware app (cached)
         self._wsgi_mounts: List = []        # (prefix, WsgiToAsgi) pairs
         self.listeners: Dict[str, List[Callable]] = {
             "before_server_start": [],
@@ -204,9 +205,9 @@ class Fenrir:
             return handler
         return decorator
 
-    def websocket(self, path: str):
+    def websocket(self, path: str, timeout: float = None):
         def decorator(handler):
-            self.add_websocket_route(path, handler)
+            self.add_websocket_route(path, handler, ws_timeout=timeout)
             return handler
         return decorator
 
@@ -228,8 +229,8 @@ class Fenrir:
     def add_route(self, path: str, handler: Any, methods: List[str] = None, **route_kwargs):
         self.router.add_route(path, handler, methods, **route_kwargs)
 
-    def add_websocket_route(self, path: str, handler: Any):
-        self.router.add_websocket_route(path, handler)
+    def add_websocket_route(self, path: str, handler: Any, ws_timeout: float = None):
+        self.router.add_websocket_route(path, handler, ws_timeout=ws_timeout)
 
     def include_router(self, router: Router, prefix: str = ""):
         self.router.include_router(router, prefix=prefix)
@@ -241,6 +242,7 @@ class Fenrir:
         as ``await mw(scope, receive, send)``.
         """
         self._asgi_middlewares.append((middleware_class, options))
+        self._asgi_app = None  # invalidate cached middleware stack
 
     def mount_wsgi(self, path: str, wsgi_app: Any) -> None:
         """Mount a WSGI application (e.g. a Bottle app) under *path*.
@@ -398,12 +400,15 @@ class Fenrir:
         global _active_app
         _active_app = self
 
-        # Apply ASGI middleware stack (outermost first, added last)
-        if self._asgi_middlewares:
+        # Build ASGI middleware stack once and cache it
+        if self._asgi_middlewares and not self._asgi_app:
             app = self._dispatch
             for mw_class, mw_options in reversed(self._asgi_middlewares):
                 app = mw_class(app, **mw_options)
-            await app(scope, receive, send)
+            self._asgi_app = app
+
+        if self._asgi_app:
+            await self._asgi_app(scope, receive, send)
             return
 
         await self._dispatch(scope, receive, send)
@@ -450,7 +455,8 @@ class Fenrir:
                 await send({"type": "websocket.close", "code": 1008})
                 return
 
-            ws = WebSocket(scope, receive, send)
+            ws_timeout = getattr(route, "ws_timeout", None)
+            ws = WebSocket(scope, receive, send, timeout=ws_timeout)
             resp = Response(status=200)
             token_req = _request_ctx_var.set(req)
             token_g = _g_ctx_var.set(G())
@@ -569,6 +575,9 @@ class Fenrir:
                 elif hasattr(route, "response_model") and route.response_model is not None:
                     coerced = self._apply_response_model(route, response_obj)
                     response_obj = coerced
+                elif hasattr(route, "response_models") and route.response_models:
+                    coerced = self._apply_response_model(route, response_obj)
+                    response_obj = coerced
 
                 # Convert handler result to Response object (only if not already a Response)
                 if not isinstance(response_obj, Response):
@@ -678,11 +687,37 @@ class Fenrir:
             return await to_thread(func, *args, **kwargs)
 
     def _apply_response_model(self, route: Route, content: Any) -> Response:
-        """Serialise *content* through the route's response_model if defined."""
+        """Serialise *content* through the route's response_model if defined.
+
+        Also supports ``response_models`` dict: ``{status_code: model}`` for
+        multiple response models per status code (runtime validation).
+        """
+        # Determine actual status code from content tuple
+        actual_status = getattr(route, "status_code", 200)
+        actual_content = content
+        if isinstance(content, tuple):
+            if len(content) == 2:
+                actual_content, actual_status = content
+            elif len(content) == 3:
+                actual_content, actual_status, _ = content
+
+        # Check response_models dict first (multiple models per status)
+        response_models = getattr(route, "response_models", {})
+        if response_models and actual_status in response_models:
+            rm = response_models[actual_status]
+            return self._serialize_with_model(rm, actual_content, actual_status, route)
+
+        # Fall back to the single response_model
         rm = getattr(route, "response_model", None)
         if rm is None:
+            if isinstance(content, tuple):
+                return self._coerce_response(content)
             return self._coerce_response(content)
 
+        return self._serialize_with_model(rm, actual_content, actual_status, route)
+
+    def _serialize_with_model(self, rm: Any, content: Any, status: int, route: Route) -> Response:
+        """Serialize *content* through a Pydantic model."""
         try:
             from pydantic import BaseModel, TypeAdapter
 
@@ -690,13 +725,9 @@ class Fenrir:
             exclude_defaults = getattr(route, "response_model_exclude_defaults", False)
             include = getattr(route, "response_model_include", None)
             exclude = getattr(route, "response_model_exclude", None)
-            status = getattr(route, "status_code", 200)
 
             if isinstance(rm, type) and issubclass(rm, BaseModel):
-                # Always go through response_model.model_validate so extra fields
-                # from a different Pydantic model are properly stripped.
                 if isinstance(content, BaseModel):
-                    # Convert via dict to let response_model pick only its fields
                     raw_dict = content.model_dump()
                     validated = rm.model_validate(raw_dict)
                 elif isinstance(content, dict):
