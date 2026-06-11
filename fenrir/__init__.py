@@ -68,7 +68,7 @@ from fenrir.sessions import (
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "2.3.2"
+__version__ = "2.3.3"
 __all__ = [
     # Core app
     "Fenrir",
