@@ -86,7 +86,7 @@ class WsgiToAsgi:
             ]
 
         # Run WSGI app in thread so sync WSGI doesn't block event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response_iter: Iterable[bytes] = await loop.run_in_executor(
             None, lambda: self.wsgi_app(environ, start_response)
         )

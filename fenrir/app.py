@@ -1,22 +1,22 @@
 import asyncio
 import inspect
 import logging
+import os
+import sys
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from fenrir.compat import to_thread
 from fenrir.request import Request
 from fenrir.response import Response, JSONResponse, HTMLResponse, StreamingResponse
 from fenrir.routing import Router, Route
-from fenrir.context import _request_ctx_var, _g_ctx_var, G
+from fenrir.context import _request_ctx_var, _g_ctx_var, _app_ctx_var, G
 from fenrir.dependencies import resolve_parameters
 from fenrir.openapi import get_openapi, get_swagger_html, get_redoc_html
 from fenrir.exceptions import HTTPException, HTTPInternalServerError, HTTPNotFound, HTTPMethodNotAllowed
 
-import sys
-
 logger = logging.getLogger("fenrir")
 
-# Global active app reference for Asteri loader (persisted via sys namespace to survive reloads)
-_active_app: Optional["Fenrir"] = getattr(sys, "_fenrir_active_app", None)
+# Global active app reference for Asteri loader
+_active_app: Optional["Fenrir"] = None
 
 
 class _WsgiMount(Exception):
@@ -85,14 +85,12 @@ class Blueprint:
         return decorator
 
 
-import os
-
 class Fenrir:
     def __init__(
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "2.2.2",
+        version: str = "2.3.2",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",
@@ -395,8 +393,6 @@ class Fenrir:
 
     # ASGI Entrypoint
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable):
-        import sys
-        sys._fenrir_active_app = self
         global _active_app
         _active_app = self
 
@@ -414,8 +410,6 @@ class Fenrir:
         await self._dispatch(scope, receive, send)
 
     async def _dispatch(self, scope: Dict[str, Any], receive: Callable, send: Callable):
-        import sys
-        sys._fenrir_active_app = self
         global _active_app
         _active_app = self
 
@@ -819,10 +813,8 @@ class Fenrir:
         """Run the Fenrir app locally using Asteri v2.2.2 ASGI worker."""
         from asteri.arbiter import Arbiter
         from asteri.workers.asgi import ASGIWorker
-        import sys
         
         # Store our application instance globally so Asteri's worker process can import it
-        sys._fenrir_active_app = self
         global _active_app
         _active_app = self
         

@@ -1,5 +1,4 @@
 import contextvars
-import sys
 from typing import Any
 
 _request_ctx_var = contextvars.ContextVar("request_ctx")
@@ -62,9 +61,6 @@ class AppProxy(LocalProxy):
         try:
             return _app_ctx_var.get()
         except LookupError:
-            app = getattr(sys, "_fenrir_active_app", None)
-            if app is not None:
-                return app
             raise RuntimeError("Working outside of application context.")
 
 

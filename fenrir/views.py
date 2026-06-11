@@ -39,7 +39,6 @@ class MethodView(View):
     async def dispatch_request(self, *args: Any, **kwargs: Any) -> Any:
         from fenrir.context import _request_ctx_var, _app_ctx_var
         from fenrir.dependencies import resolve_parameters
-        import sys
 
         # Get request from the ASGI context
         try:
@@ -70,7 +69,8 @@ class MethodView(View):
             try:
                 app = _app_ctx_var.get()
             except LookupError:
-                app = getattr(sys, "_fenrir_active_app", None)
+                from fenrir.app import _active_app
+                app = _active_app
 
             path_params = getattr(req, "path_params", {})
 

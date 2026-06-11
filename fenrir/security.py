@@ -98,6 +98,77 @@ class APIKeyQuery(APIKeyBase):
         return api_key
 
 
+class WebSocketTokenAuth(SecurityBase):
+    """WebSocket authentication dependency that validates a token from the
+    initial WebSocket connection headers or query parameters.
+
+    Usage::
+
+        from fenrir import WebSocket, Depends
+        from fenrir.security import WebSocketTokenAuth
+
+        auth = WebSocketTokenAuth()
+
+        @app.websocket("/ws")
+        async def ws_handler(websocket: WebSocket, token: str = Depends(auth)):
+            await websocket.accept()
+            ...
+    """
+
+    def __init__(
+        self,
+        header_name: str = "authorization",
+        query_param: str = "token",
+        scheme_name: Optional[str] = None,
+        description: Optional[str] = None,
+        auto_error: bool = True,
+    ):
+        super().__init__(scheme_name=scheme_name, description=description)
+        self.header_name = header_name
+        self.query_param = query_param
+        self.auto_error = auto_error
+        self.model = {
+            "type": "http",
+            "scheme": "bearer",
+            "description": description or "WebSocket token authentication",
+        }
+
+    async def __call__(self, websocket: Any = None) -> Optional[str]:
+        if websocket is None:
+            if self.auto_error:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return None
+
+        scope = websocket.scope
+        headers = dict(scope.get("headers", []))
+
+        # Try header first
+        token = None
+        header_val = headers.get(self.header_name.encode("latin-1"))
+        if header_val:
+            auth = header_val.decode("latin-1")
+            parts = auth.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+            else:
+                token = auth
+
+        # Fall back to query parameter
+        if token is None:
+            query_string = scope.get("query_string", b"").decode("latin-1")
+            import urllib.parse
+            params = urllib.parse.parse_qs(query_string)
+            token_vals = params.get(self.query_param, [])
+            if token_vals:
+                token = token_vals[0]
+
+        if not token:
+            if self.auto_error:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return None
+        return token
+
+
 class HTTPBase(SecurityBase):
     def __init__(
         self,

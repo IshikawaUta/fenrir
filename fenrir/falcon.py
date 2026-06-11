@@ -1,4 +1,3 @@
-import asyncio
 from typing import Callable, Any, Dict, Optional, Union
 from fenrir.exceptions import HTTPException
 

@@ -1,6 +1,6 @@
 import urllib.parse
 import json
-from typing import Dict, Any, List, Optional
+from typing import AsyncIterator, Dict, Any, List, Optional
 
 class Request:
     def __init__(self, scope: Dict[str, Any]):
@@ -37,6 +37,7 @@ class Request:
         self._form = None
         self._parsed = False
         self.session = None
+        self._receive = None
 
     @property
     def host(self) -> str:
@@ -64,6 +65,7 @@ class Request:
         if self._parsed:
             return
         
+        self._receive = receive
         body_chunks = []
         more_body = True
         while more_body:
@@ -76,6 +78,32 @@ class Request:
 
         self._body = b"".join(body_chunks)
         self._parsed = True
+
+    async def stream_body(self, chunk_size: int = 65536) -> AsyncIterator[bytes]:
+        """Stream request body in chunks for memory-efficient processing.
+
+        If the body has already been fully read (via ``_read_body``), yields
+        the buffered data in chunks.  Otherwise streams directly from the ASGI
+        receive channel — the body is **not** buffered so ``self.body`` / ``self.json``
+        will not be available after streaming.
+        """
+        if self._parsed:
+            offset = 0
+            while offset < len(self._body):
+                yield self._body[offset:offset + chunk_size]
+                offset += chunk_size
+            return
+
+        more_body = True
+        while more_body:
+            message = await self._receive()
+            if message["type"] == "http.request":
+                chunk = message.get("body", b"")
+                if chunk:
+                    yield chunk
+                more_body = message.get("more_body", False)
+            elif message["type"] == "http.disconnect":
+                break
 
     @property
     def body(self) -> bytes:
@@ -125,8 +153,6 @@ class Request:
                     self._form[name] = value
 
             # State dict shared by the interceptor closures.
-            # Needed because python-multipart < 0.0.21 did NOT store content_type
-            # on the File object; we grab it from the raw part headers instead.
             _part_state: Dict[str, Any] = {
                 "content_type": "",
                 "header_name": [],
@@ -137,7 +163,6 @@ class Request:
             def on_file(file):
                 name = decode_bytes(file.field_name)
                 filename = decode_bytes(file.file_name)
-                # Prefer the native property; fall back to our intercepted value.
                 raw_ct = (
                     getattr(file, "content_type", None)
                     or getattr(file, "_content_type", None)
@@ -157,8 +182,6 @@ class Request:
 
             parser_inst = multipart.create_form_parser(headers, on_field, on_file)
 
-            # Wrap the underlying MultipartParser callbacks so we can intercept
-            # per-part headers before they are discarded by the library.
             if hasattr(parser_inst, "parser") and hasattr(parser_inst.parser, "callbacks"):
                 orig_cb = parser_inst.parser.callbacks
 
@@ -196,7 +219,6 @@ class Request:
                     "on_headers_finished": _hfinished,
                 }
 
-            # Feed the full body to the parser.
             chunk_size = 1 << 20  # 1 MiB
             while True:
                 chunk = body_stream.read(chunk_size)

@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import Any
 from fenrir.exceptions import HTTPInternalServerError
 
@@ -33,8 +32,7 @@ def render_template(template_name: str, **context: Any) -> str:
     from fenrir.app import _active_app
     from fenrir.signals import template_rendered
 
-    # Try to find active app from global context or sys namespace
-    app = _active_app or getattr(sys, "_fenrir_active_app", None)
+    app = _active_app
 
     if app is not None and hasattr(app, "renderer") and app.renderer is not None:
         try:

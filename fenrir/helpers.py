@@ -1,6 +1,5 @@
 import os
 import mimetypes
-import sys
 import urllib.parse
 from typing import Any, Dict, Optional
 from fenrir.exceptions import HTTPNotFound
@@ -51,7 +50,7 @@ def url_for(endpoint: str, **values: Any) -> str:
         app = current_app._get_current_object()
     except RuntimeError:
         from fenrir.app import _active_app
-        app = _active_app or getattr(sys, "_fenrir_active_app", None)
+        app = _active_app
 
     if app is None:
         raise RuntimeError("Attempted to generate a URL without an active application context.")

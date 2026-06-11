@@ -27,7 +27,7 @@ from fenrir.response import (
 from fenrir.templating import render_template, BaseTemplateRenderer, Jinja2Renderer
 from fenrir.views import View, MethodView
 from fenrir.helpers import url_for, send_file, send_from_directory, redirect
-from fenrir.routing import Router, Route, APIRouter
+from fenrir.routing import Router, Route, APIRouter, RouteTrie
 from fenrir.sse import EventSourceResponse
 from fenrir.security import (
     APIKeyCookie,
@@ -39,6 +39,7 @@ from fenrir.security import (
     OAuth2PasswordBearer,
     OAuth2AuthorizationCodeBearer,
     OpenIDConnect,
+    WebSocketTokenAuth,
 )
 from fenrir.background import BackgroundTasks, BackgroundTask
 from fenrir.compat import WsgiToAsgi, install_bottle_compat, install_falcon_compat, install_sanic_compat
@@ -53,6 +54,8 @@ from fenrir.middleware import (
     RequestIDMiddleware,
     RateLimitMiddleware,
 )
+from fenrir.pool import ConnectionPool, DatabasePool
+from fenrir.http2 import HTTP2Push
 from fenrir.pagination import PaginationParams, paginate, paginate_dict
 from fenrir.sessions import (
     RedisSessionInterface,
@@ -65,7 +68,7 @@ from fenrir.sessions import (
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "2.2.2"
+__version__ = "2.3.2"
 __all__ = [
     # Core app
     "Fenrir",
@@ -126,6 +129,7 @@ __all__ = [
     "Router",
     "Route",
     "APIRouter",
+    "RouteTrie",
     # SSE
     "EventSourceResponse",
     # Security
@@ -138,6 +142,7 @@ __all__ = [
     "OAuth2PasswordBearer",
     "OAuth2AuthorizationCodeBearer",
     "OpenIDConnect",
+    "WebSocketTokenAuth",
     # Background tasks
     "BackgroundTasks",
     "BackgroundTask",
@@ -165,6 +170,11 @@ __all__ = [
     "PaginationParams",
     "paginate",
     "paginate_dict",
+    # Connection Pooling
+    "ConnectionPool",
+    "DatabasePool",
+    # HTTP/2 Push
+    "HTTP2Push",
     # Server-side sessions
     "RedisSessionInterface",
     "InMemorySessionInterface",

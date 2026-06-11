@@ -67,6 +67,98 @@ def compile_path(path_pattern: str) -> Tuple[re.Pattern, Dict[str, Callable]]:
     return full_regex, converters
 
 
+class _TrieNode:
+    """Internal trie node for O(k) route matching where k = path depth."""
+    __slots__ = ('children', 'param_child', 'param_name', 'param_converter', 'routes')
+
+    def __init__(self):
+        self.children: Dict[str, "_TrieNode"] = {}
+        self.param_child: Optional["_TrieNode"] = None
+        self.param_name: Optional[str] = None
+        self.param_converter: Optional[Callable] = None
+        self.routes: List["Route"] = []
+
+
+class RouteTrie:
+    """Trie-based route index for fast prefix matching.
+
+    Static path segments are stored as exact-match children in the trie.
+    Dynamic segments (``<param>``) are stored as a single parametric child
+    per trie node.  At most one regex-based converter (``<re:pattern:name>``)
+    is allowed per level since regex routes cannot be indexed structurally.
+
+    The trie only acts as a *pre-filter*: after the trie yields candidate
+    routes, each candidate is validated through its compiled regex to
+    extract parameters and handle converter-specific semantics.
+    """
+
+    def __init__(self):
+        self.root = _TrieNode()
+        self._static_routes: Dict[str, List["Route"]] = {}
+
+    def insert(self, route: "Route") -> None:
+        """Insert a route into the trie index."""
+        segments = [s for s in route.path_pattern.split("/") if s]
+        node = self.root
+        is_static = True
+        regex_segments = []
+
+        for seg in segments:
+            if seg.startswith("<") and seg.endswith(">"):
+                is_static = False
+                inner = seg[1:-1]
+                parts = inner.split(":")
+                if parts[0] == "re":
+                    param_name = parts[-1]
+                elif len(parts) == 2:
+                    _, param_name = parts
+                else:
+                    param_name = parts[0]
+                regex_segments.append(param_name)
+                if node.param_child is None:
+                    node.param_child = _TrieNode()
+                    node.param_child.param_name = param_name
+                node = node.param_child
+            else:
+                regex_segments.append(seg)
+                if seg not in node.children:
+                    node.children[seg] = _TrieNode()
+                node = node.children[seg]
+
+        node.routes.append(route)
+        if is_static:
+            self._static_routes.setdefault(route.path_pattern, []).append(route)
+
+    def search(self, path: str) -> List["Route"]:
+        """Return candidate routes matching *path*. O(k) where k = segments."""
+        segments = [s for s in path.split("/") if s]
+        candidates: List["Route"] = []
+        self._search_node(self.root, segments, 0, candidates)
+        return candidates
+
+    def _search_node(
+        self,
+        node: "_TrieNode",
+        segments: List[str],
+        depth: int,
+        candidates: List["Route"],
+    ) -> None:
+        if depth == len(segments):
+            candidates.extend(node.routes)
+            return
+
+        seg = segments[depth]
+
+        # Exact static match
+        child = node.children.get(seg)
+        if child is not None:
+            self._search_node(child, segments, depth + 1, candidates)
+
+        # Parametric match
+        if node.param_child is not None:
+            self._search_node(node.param_child, segments, depth + 1, candidates)
+
+
 class Route:
     def __init__(
         self,
@@ -146,6 +238,7 @@ class Router:
         self.websocket_routes: List[Route] = []
         self.route_class = route_class or Route
         self.included_routers = []
+        self._trie = RouteTrie()
 
     def include_router(self, other: "Router", prefix: str = ""):
         if other is self:
@@ -240,6 +333,7 @@ class Router:
 
         route = self.route_class(path_pattern, handler, methods, **filtered_kwargs)
         self.routes.append(route)
+        self._trie.insert(route)
 
     def add_websocket_route(self, path_pattern: str, handler: Any, ws_timeout: float = None):
         route = self.route_class(path_pattern, handler, ["WEBSOCKET"], ws_timeout=ws_timeout)
@@ -251,8 +345,11 @@ class Router:
         effective_method = "GET" if method == "HEAD" else method
         path_matched = False
         allowed_methods = set()
-        
-        for route in self.routes:
+
+        # Use trie for O(k) candidate lookup instead of O(n) linear scan
+        candidates = self._trie.search(path)
+
+        for route in candidates:
             params = route.match(path)
             if params is not None:
                 path_matched = True

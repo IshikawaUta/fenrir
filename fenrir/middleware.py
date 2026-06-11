@@ -142,11 +142,12 @@ class GZipMiddleware:
     """ASGI middleware that compresses response bodies with gzip.
 
     Only compresses responses with compressible content types and bodies
-    exceeding the minimum size threshold.
+    exceeding the minimum size threshold.  Uses streaming compression for
+    memory efficiency on large responses.
 
     Usage::
 
-        app.add_middleware(GZipMiddleware, minimum_size=500)
+        app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
     """
 
     COMPRESSIBLE_TYPES = {
@@ -171,7 +172,7 @@ class GZipMiddleware:
         self,
         app: Callable,
         minimum_size: int = 500,
-        compresslevel: int = 9,
+        compresslevel: int = 6,
     ) -> None:
         self.app = app
         self.minimum_size = minimum_size
@@ -202,11 +203,10 @@ class GZipMiddleware:
         body_chunks: List[bytes] = []
         initial_message: Optional[Dict[str, Any]] = None
         content_type_value = ""
-        non_compressible = False
         bypass = False
 
         async def send_wrapper(message: Dict[str, Any]) -> None:
-            nonlocal initial_message, content_type_value, non_compressible, bypass
+            nonlocal initial_message, content_type_value, bypass
 
             if message["type"] == "http.response.start":
                 status = message.get("status", 200)
@@ -313,13 +313,31 @@ class RequestIDMiddleware:
 
 
 class RateLimitMiddleware:
-    """ASGI middleware that rate-limits requests per client IP.
+    """ASGI middleware that rate-limits requests per client IP or per-user.
 
     Uses a sliding-window counter algorithm with automatic cleanup.
+    Supports an optional Redis backend for distributed rate limiting.
 
     Usage::
 
+        # Per-IP rate limiting (default)
         app.add_middleware(RateLimitMiddleware, max_requests=100, window_seconds=60)
+
+        # Per-user rate limiting with custom key function
+        def user_key(scope):
+            for k, v in scope.get("headers", []):
+                if k == b"x-user-id":
+                    return v.decode("latin-1")
+            # fallback to IP
+            client = scope.get("client")
+            return client[0] if client else "unknown"
+
+        app.add_middleware(RateLimitMiddleware, key_func=user_key)
+
+        # Distributed rate limiting with Redis
+        import redis.asyncio as aioredis
+        redis_client = aioredis.Redis()
+        app.add_middleware(RateLimitMiddleware, redis_client=redis_client)
     """
 
     def __init__(
@@ -329,12 +347,14 @@ class RateLimitMiddleware:
         window_seconds: int = 60,
         key_func: Optional[Callable[[Dict[str, Any]], str]] = None,
         retry_after_header: bool = True,
+        redis_client: Any = None,
     ) -> None:
         self.app = app
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.key_func = key_func or self._default_key
         self.retry_after_header = retry_after_header
+        self._redis = redis_client
         self._requests: Dict[str, List[float]] = defaultdict(list)
         self._last_cleanup = time.monotonic()
 
@@ -373,14 +393,40 @@ class RateLimitMiddleware:
         self._requests[key].append(now)
         return False, 0.0
 
+    async def _is_rate_limited_redis(self, key: str) -> Tuple[bool, float]:
+        """Distributed rate limiting using Redis sliding window."""
+        import time as _time
+        import uuid
+        now = _time.monotonic()
+        window_start = now - self.window_seconds
+        unique_id = f"{now}:{uuid.uuid4().hex[:8]}"
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zadd(key, {unique_id: now})
+        pipe.zcard(key)
+        pipe.expire(key, self.window_seconds)
+        results = await pipe.execute()
+        current_count = results[2]
+        if current_count >= self.max_requests:
+            oldest = await self._redis.zrange(key, 0, 0, withscores=True)
+            if oldest:
+                retry_after = self.window_seconds - (now - oldest[0][1])
+                return True, max(retry_after, 0.0)
+            return True, float(self.window_seconds)
+        return False, 0.0
+
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        self._cleanup()
         key = self.key_func(scope)
-        limited, retry_after = self._is_rate_limited(key)
+
+        if self._redis is not None:
+            limited, retry_after = await self._is_rate_limited_redis(key)
+        else:
+            self._cleanup()
+            limited, retry_after = self._is_rate_limited(key)
 
         if limited:
             headers = [
