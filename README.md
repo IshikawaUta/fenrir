@@ -81,7 +81,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="2.3.3")
+app = Fenrir(title="Fenrir Hybrid Demo", version="2.3.4")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v2.3.3 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v2.3.4 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -339,7 +339,7 @@ PYTHONPATH=. pytest -v
 
 ## 🔄 Changelog
 
-### v2.3.3 — Architecture & Performance Upgrade
+### v2.3.4 — Architecture & Performance Upgrade
 
 Major architecture improvements, new features, and performance optimizations:
 
