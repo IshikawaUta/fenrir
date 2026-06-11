@@ -155,7 +155,7 @@ async def handle_value_error(req, exc):
 async def trigger_error():
     raise ValueError("Something went wrong!")
 
-# --- 7. Bottle-style Built-in Server Runner (runs programmatically via Asteri v2.2.2) ---
+# --- 7. Bottle-style Built-in Server Runner (runs programmatically via Asteri) ---
 if __name__ == "__main__":
     logger.info("Starting Fenrir Web Application...")
-    app.run(host="127.0.0.1", port=8000, workers=2, reload=False)
+    app.run(host="127.0.0.1", port=8000, workers=2, app_path="demo_app:app")

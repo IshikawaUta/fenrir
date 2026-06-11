@@ -809,18 +809,44 @@ class Fenrir:
         return JSONResponse({"detail": "Internal Server Error"}, status=500)
 
     # Server runner using Asteri
-    def run(self, host: str = "127.0.0.1", port: int = 8000, workers: int = 1, **kwargs):
-        """Run the Fenrir app locally using Asteri v2.2.2 ASGI worker."""
+    def run(self, host: str = "127.0.0.1", port: int = 8000, workers: int = 1, app_path: str = None, **kwargs):
+        """Run the Fenrir app locally using Asteri ASGI worker.
+        
+        Args:
+            host: Host address to bind to
+            port: Port to listen on
+            workers: Number of worker processes
+            app_path: Import path for the app (e.g. 'demo_app:app'). 
+                      If None, auto-detects from caller's module.
+        """
         from asteri.arbiter import Arbiter
         from asteri.workers.asgi import ASGIWorker
         
-        # Store our application instance globally so Asteri's worker process can import it
-        global _active_app
-        _active_app = self
+        if app_path is None:
+            # Auto-detect: find the caller's module and variable name
+            try:
+                frame = sys._getframe(1)
+                caller_file = frame.f_globals.get("__file__")
+                caller_var = frame.f_locals.get("app")
+                if caller_file and caller_var is self:
+                    import importlib
+                    mod_name = frame.f_globals.get("__name__")
+                    if mod_name and mod_name != "__main__":
+                        app_path = f"{mod_name}:app"
+                    else:
+                        mod_path = os.path.splitext(os.path.relpath(caller_file))[0].replace(os.sep, ".")
+                        app_path = f"{mod_path}:app"
+            except Exception:
+                pass
         
-        # Tell Asteri to load 'fenrir.app:_active_app'
+        if app_path is None:
+            raise RuntimeError(
+                "Could not auto-detect app_path. Pass it explicitly: "
+                "app.run(app_path='myapp:app')"
+            )
+        
         arbiter = Arbiter(
-            app_path="fenrir.app:_active_app",
+            app_path=app_path,
             worker_class=ASGIWorker,
             num_workers=workers,
             binds=[f"{host}:{port}"],

@@ -153,35 +153,22 @@ def cmd_run(args):
     
     # Print our beautiful blue banner
     print_banner(app.title)
+    print(f"\033[94mStarting Fenrir App '{app.title}' v{app.version}...\033[0m")
     
-    # Check if watchdog is installed
-    has_watchdog = False
-    if reload_mode:
-        try:
-            import watchdog
-            has_watchdog = True
-        except ImportError:
-            has_watchdog = False
-            
-    if reload_mode and not has_watchdog:
-        def serve():
-            app_to_serve = load_app(args.target)
-            print(f"\033[94mStarting Fenrir App '{app_to_serve.title}' v{app_to_serve.version}...\033[0m")
-            app_to_serve.run(
-                host=args.host,
-                port=args.port,
-                workers=args.workers,
-                reload=False,
-            )
-        run_with_reloader(serve)
-    else:
-        print(f"\033[94mStarting Fenrir App '{app.title}' v{app.version}...\033[0m")
-        app.run(
-            host=args.host,
-            port=args.port,
-            workers=args.workers,
+    try:
+        from asteri.arbiter import Arbiter
+        from asteri.workers.asgi import ASGIWorker
+        
+        arbiter = Arbiter(
+            app_path=args.target,
+            worker_class=ASGIWorker,
+            num_workers=args.workers,
+            binds=[f"{args.host}:{args.port}"],
             reload=reload_mode,
         )
+        arbiter.start()
+    except KeyboardInterrupt:
+        pass
 
 
 def cmd_routes(args):
