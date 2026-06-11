@@ -11,6 +11,7 @@ import logging
 import time
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
+from fenrir.compat import to_thread
 
 logger = logging.getLogger("fenrir.pool")
 
@@ -87,7 +88,7 @@ class ConnectionPool(Generic[T]):
 
     async def _create_connection(self) -> T:
         """Create a new connection."""
-        return await asyncio.to_thread(self._create_func)
+        return await to_thread(self._create_func)
 
     async def _validate_connection(self, item: _PoolItem[T]) -> bool:
         """Validate a connection is still healthy."""

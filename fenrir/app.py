@@ -389,7 +389,7 @@ class Fenrir:
             if inspect.iscoroutinefunction(listener):
                 await listener(self)
             else:
-                await asyncio.to_thread(listener, self)
+                await to_thread(listener, self)
 
     # ASGI Entrypoint
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable):
