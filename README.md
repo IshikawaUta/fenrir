@@ -81,7 +81,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="2.3.4")
+app = Fenrir(title="Fenrir Hybrid Demo", version="2.3.5")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v2.3.4 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v2.3.5 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -339,7 +339,19 @@ PYTHONPATH=. pytest -v
 
 ## 🔄 Changelog
 
-### v2.3.4 — Architecture & Performance Upgrade
+### v2.3.5 — Bug Fix & Changelog Update
+- Updated changelog to accurately reflect version history
+- All version references synchronized across codebase
+
+### v2.3.4 — Bug Fix Release
+- Fix server crash: `fenrir run` was passing wrong `app_path` (`fenrir.app:_active_app`) to Asteri worker, causing `'NoneType' object is not callable`
+- Fix Python 3.8 support: replaced `asyncio.to_thread` with `fenrir.compat.to_thread` shim
+- Updated all version strings across codebase
+
+### v2.3.3 — 🚫 Retracted
+- Published with incomplete version updates, superseded by v2.3.4
+
+### v2.3.2 — Architecture & Performance Upgrade
 
 Major architecture improvements, new features, and performance optimizations:
 
