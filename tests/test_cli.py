@@ -74,16 +74,12 @@ def test_cli_shell(mock_load_app):
 
 def test_cli_run(mock_load_app):
     app = MockApp()
+    mock_arbiter = mock.MagicMock()
     with mock.patch("fenrir.cli.load_app", return_value=app):
-        with mock.patch.object(app, "run") as mock_run:
+        with mock.patch("asteri.arbiter.Arbiter", return_value=mock_arbiter):
             with mock.patch("sys.argv", ["fenrir", "run", "mock_module:app", "-p", "8888", "--dev"]):
                 main()
-                mock_run.assert_called_once_with(
-                    host="127.0.0.1",
-                    port=8888,
-                    workers=1,
-                    reload=True
-                )
+                mock_arbiter.start.assert_called_once()
 
 
 def test_cli_bench(mock_load_app):
