@@ -126,7 +126,7 @@ def send_file(
 
     headers = {}
     if as_attachment:
-        headers["content-disposition"] = f"attachment; filename={name}"
+        headers["content-disposition"] = f'attachment; filename="{name}"'
     return Response(body=data, content_type=mimetype, headers=headers)
 
 

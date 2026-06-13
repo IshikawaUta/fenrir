@@ -168,9 +168,11 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
                         lookup_key = param_name.replace("_", "-").lower()
 
                     # Path params override location
-                    if f"{{{param_name}}}" in clean_path:
+                    if f"{{{param_name}}}" in clean_path or (alias and f"{{{alias}}}" in clean_path):
                         param_in = "path"
                         has_default = False
+                        if alias:
+                            lookup_key = alias
 
                     schema = _annotation_to_schema(annotation)
                     if (

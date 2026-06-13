@@ -75,7 +75,7 @@ class _TrieNode:
         self.children: Dict[str, "_TrieNode"] = {}
         self.param_child: Optional["_TrieNode"] = None
         self.param_name: Optional[str] = None
-        self.param_converter: Optional[Callable] = None
+        self.param_converter: Optional[str] = None  # 'int', 'float', 'path', 'str', etc.
         self.routes: List["Route"] = []
 
 
@@ -101,26 +101,37 @@ class RouteTrie:
         segments = [s for s in route.path_pattern.split("/") if s]
         node = self.root
         is_static = True
-        regex_segments = []
 
         for seg in segments:
             if seg.startswith("<") and seg.endswith(">"):
                 is_static = False
                 inner = seg[1:-1]
                 parts = inner.split(":")
+                converter_name = "str"
+                param_name = ""
                 if parts[0] == "re":
                     param_name = parts[-1]
                 elif len(parts) == 2:
-                    _, param_name = parts
+                    p1, p2 = parts[0].strip(), parts[1].strip()
+                    if p1 in CONVERTER_PATTERNS:
+                        converter_name = p1
+                        param_name = p2
+                    elif p2 in CONVERTER_PATTERNS:
+                        converter_name = p2
+                        param_name = p1
+                    else:
+                        param_name = p1
                 else:
                     param_name = parts[0]
-                regex_segments.append(param_name)
+                    if param_name in CONVERTER_PATTERNS:
+                        converter_name = param_name
+                        param_name = parts[1] if len(parts) > 1 else param_name
                 if node.param_child is None:
                     node.param_child = _TrieNode()
                     node.param_child.param_name = param_name
+                    node.param_child.param_converter = converter_name
                 node = node.param_child
             else:
-                regex_segments.append(seg)
                 if seg not in node.children:
                     node.children[seg] = _TrieNode()
                 node = node.children[seg]
@@ -156,7 +167,18 @@ class RouteTrie:
 
         # Parametric match
         if node.param_child is not None:
-            self._search_node(node.param_child, segments, depth + 1, candidates)
+            # 'path' converter matches all remaining segments (including slashes)
+            if node.param_child.param_converter == "path":
+                candidates.extend(node.param_child.routes)
+                # Also recurse into children for routes with static segments after <path>.
+                # <path> matches all remaining segments, so static children could appear
+                # at any depth from depth+1 to len(segments).
+                if node.param_child.children:
+                    for child_depth in range(depth + 1, len(segments) + 1):
+                        for child_node in node.param_child.children.values():
+                            self._search_node(child_node, segments, child_depth, candidates)
+            else:
+                self._search_node(node.param_child, segments, depth + 1, candidates)
 
 
 class Route:
@@ -375,7 +397,10 @@ class Router:
                         allowed_methods.update(route.methods)
                         
         if path_matched:
-            raise HTTPMethodNotAllowed(detail=f"Allowed methods: {', '.join(sorted(allowed_methods))}")
+            raise HTTPMethodNotAllowed(
+                detail=f"Allowed methods: {', '.join(sorted(allowed_methods))}",
+                headers={"Allow": ", ".join(sorted(allowed_methods))},
+            )
         
         raise HTTPNotFound(detail="No route matches the requested path.")
 

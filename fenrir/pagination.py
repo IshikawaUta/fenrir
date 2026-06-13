@@ -97,8 +97,14 @@ def paginate(
     def _build_url(page_num: int) -> str:
         if not base_url:
             return ""
-        sep = "&" if "?" in base_url else "?"
-        return f"{base_url}{sep}page={page_num}&size={size}"
+        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        parsed = urlparse(base_url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        # Flatten single-value lists and update page/size
+        params["page"] = [str(page_num)]
+        params["size"] = [str(size)]
+        new_query = urlencode(params, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
 
     links = PaginationLinks(
         self_url=_build_url(page),

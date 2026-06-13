@@ -16,7 +16,6 @@ class Jinja2Renderer(BaseTemplateRenderer):
 
         if not os.path.isabs(template_folder):
             template_folder = os.path.abspath(template_folder)
-        os.makedirs(template_folder, exist_ok=True)
         self.env = Environment(
             loader=FileSystemLoader(template_folder),
             autoescape=True

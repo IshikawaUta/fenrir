@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-568%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-614%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -57,8 +57,11 @@ pip install -e .
 *   **🗄️ Connection Pooling**: Built-in generic `ConnectionPool` and `DatabasePool` with health checks, retry logic, and automatic connection recycling.
 *   **🌐 HTTP/2 Push**: `HTTP2Push` utility for server push with Link headers and auto-push decorators.
 *   **⏱️ Advanced Rate Limiting**: Per-IP or per-user rate limiting with optional Redis backend for distributed deployments.
+*   **🛡️ Body Size Limits**: `BodyLimitMiddleware` to reject oversized request bodies and prevent DoS attacks.
+*   **🔒 CSRF Protection**: `CSRFMiddleware` for cross-site request forgery token validation on state-changing methods, with automatic token generation and cookie injection.
 *   **📦 Streaming Request Body**: `stream_body()` method for memory-efficient processing of large uploads without buffering.
-*   **🗜️ Optimized GZip Compression**: Default compression level 6 (optimal CPU/ratio trade-off) instead of level 9.
+*   **🗜️ Streaming GZip Compression**: `GZipMiddleware` compresses each chunk on-the-fly for `StreamingResponse`, with default compression level 6 (optimal CPU/ratio trade-off).
+*   **⚡ Signature & Schema Caching**: `inspect.signature()` and OpenAPI schema are cached for faster repeated requests.
 *   **🛠️ Premium CLI Tooling**: Visual route tables, interactive app shell, in-memory benchmarking suite, project scaffolding, and environment system inspection.
 *   **🐍 Python 3.8–3.13 Compatible**: Full backward compatibility ensured via `typing_extensions` polyfills for `Annotated`, `get_origin`, `get_args`; and a `contextvars`-aware `asyncio.to_thread` shim.
 
@@ -81,7 +84,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="2.3.5")
+app = Fenrir(title="Fenrir Hybrid Demo", version="3.0.0")
 
 # --- 1. FastAPI-Style Validation & DI ---
 class UserRegister(BaseModel):
@@ -127,7 +130,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v2.3.5 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v3.0.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -322,7 +325,7 @@ fenrir info demo_app:app
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **568 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, and rate limiting features. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **614 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, and all v3.0.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -332,12 +335,69 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-=============================== 568 passed, 1 skipped in 6.72s ===============================
+=============================== 614 passed, 1 skipped in 16.62s ===============================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v3.0.0 — Major Bug Fix & Architecture Release
+
+Fixed 21 bugs, added 46 new tests, and introduced architecture improvements:
+
+**HIGH SEVERITY Fixes (7)**
+- Fixed `routing.py`: Converter keyword as param name producing `param_name=""`.
+- Fixed `routing.py`: `<path>` converter now recurses into child nodes at all possible depths, enabling routes like `/api/<path:resource>/details` to match correctly.
+- Fixed `app.py`: Global teardown functions no longer run twice — deduplication via `seen` set.
+- Fixed `app.py`: WebSocket handlers now properly set `_app_ctx_var` so `current_app` works inside websocket handlers.
+- Fixed `dependencies.py`: Plain default params (e.g. `page: int = 1`) now return the actual default value instead of `None`.
+- Fixed `dependencies.py`: `Annotated[T, Query()]` with function default now preserves the default value.
+- Fixed `compat.py`: WSGI response body iteration now runs in a thread executor via `run_in_executor`, preventing event loop blocking.
+
+**MEDIUM SEVERITY Fixes (8)**
+- Fixed `app.py`: `_coerce_response` no longer infinitely recurses on 4+ element tuples — serializes as JSON array.
+- Fixed `app.py`: Streaming error now always sends `more_body=False` frame, ensuring complete ASGI responses.
+- Fixed `response.py`: `text` property returns `""` instead of `None` for empty bodies.
+- Fixed `security.py`: `HTTPDigest` now returns a parsed dict instead of raw header string.
+- Fixed `openapi.py`: Path parameter detection now checks both `param_name` and `alias`.
+- Fixed `pagination.py`: URL building now deduplicates query params using `urllib.parse` instead of blind appending.
+- Fixed `helpers.py`: `Content-Disposition` filename is now properly quoted.
+- Fixed `signals.py`: Async signal results are now collected as task objects.
+
+**LOW SEVERITY Fixes (6)**
+- Removed dead code `_WsgiMount` exception and `_wsgi_handler` from `app.py`.
+- Fixed unused `resp` variable in websocket path — now passed to `resolve_parameters`.
+- Removed dead code `regex_segments` from `routing.py` `RouteTrie.insert()`.
+- Fixed `templating.py`: Removed destructive `os.makedirs` side effect from `Jinja2Renderer.__init__`.
+- Fixed `context.py`: Added `hasattr` guard for `do_teardown_appcontext` in `AppContext.__exit__`.
+- Fixed `views.py`: `req.method` can no longer cause `AttributeError` — defaults to `"GET"` when `None`.
+
+**Architecture Improvements**
+- Added `BodyLimitMiddleware`: Rejects requests exceeding configurable max body size (default 10 MB), now enforces actual body size via chunk monitoring (not just Content-Length header).
+- Added `CSRFMiddleware`: CSRF token validation for state-changing HTTP methods, with automatic token generation and cookie injection (`auto_generate=True` by default).
+- Fixed `GZipMiddleware`: Streaming compression for `StreamingResponse` (on-the-fly chunk compression); fixed `_is_compressible()` to only compress explicit text-based types (was incorrectly compressing all `application/*` and `image/*`).
+- Added `inspect.signature()` caching via `_get_cached_signature()` in `dependencies.py`, now used by `resolve_parameters()` for optimal parameter resolution.
+- Added OpenAPI schema caching in `app.openapi()` — cached after first call, invalidated on route changes.
+- Fixed `CORSMiddleware`: Wildcard origin with credentials now echoes the specific origin per CORS spec.
+- Fixed `RateLimitMiddleware`: Redis backend now checks limit before adding request (matching in-memory behavior).
+- Fixed `app.py`: Lifespan handler now returns after startup failure instead of looping forever.
+
+**New Tests (46 tests)**
+- PATCH/PUT/DELETE method routing + 405 on wrong method (7 tests)
+- HTTPDigest auth parsing: success, missing header, wrong scheme, auto_error=False, field parsing (5 tests)
+- OAuth2AuthorizationCodeBearer: success, missing, auto_error=False (3 tests)
+- OpenIDConnect: success, missing, wrong scheme, auto_error=False, model (5 tests)
+- Rate limiting via Redis backend: under limit, over limit, different keys (3 tests)
+- GZip + streaming response (2 tests)
+- 4+ element tuple response coercion (4 tests)
+- Malformed JSON body + wrong content-type with strict mode (3 tests)
+- Lifespan scope handling: startup/shutdown, startup failure (2 tests)
+- CORS wildcard + credentials edge case (2 tests)
+- Signature caching verification (3 tests)
+- OpenAPI schema caching (2 tests)
+- CSRF middleware auto-token generation: GET sets cookie, POST without token rejected, POST with valid token accepted, auto_generate=False (4 tests)
+- GZip streaming compression: chunks compressed on-the-fly (1 test)
 
 ### v2.3.5 — Bug Fix & Changelog Update
 - Updated changelog to accurately reflect version history

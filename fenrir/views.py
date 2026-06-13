@@ -46,7 +46,8 @@ class MethodView(View):
         except LookupError:
             req = None
 
-        method = (req.method if req else "GET").upper()
+        method = (req.method if req else "GET") or "GET"
+        method = method.upper()
         meth = getattr(self, method.lower(), None)
         if meth is None and method == "HEAD":
             meth = getattr(self, "get", None)
@@ -69,8 +70,7 @@ class MethodView(View):
             try:
                 app = _app_ctx_var.get()
             except LookupError:
-                from fenrir.app import _active_app
-                app = _active_app
+                app = None
 
             path_params = getattr(req, "path_params", {})
 

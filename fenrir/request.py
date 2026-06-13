@@ -94,6 +94,9 @@ class Request:
                 offset += chunk_size
             return
 
+        if self._receive is None:
+            return
+
         more_body = True
         while more_body:
             message = await self._receive()
@@ -114,8 +117,8 @@ class Request:
         if self._json is None and self._body:
             try:
                 self._json = json.loads(self._body.decode("utf-8"))
-            except ValueError:
-                self._json = {}
+            except (ValueError, UnicodeDecodeError):
+                self._json = None
         return self._json
 
     async def form(self) -> Dict[str, Any]:

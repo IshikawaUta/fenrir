@@ -95,8 +95,11 @@ class AppContext:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
-        self.app.do_teardown_appcontext(exc_val)
-        _app_ctx_var.reset(self._token)
+        try:
+            if hasattr(self.app, "do_teardown_appcontext"):
+                self.app.do_teardown_appcontext(exc_val)
+        finally:
+            _app_ctx_var.reset(self._token)
 
 
 class RequestContext:

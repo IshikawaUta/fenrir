@@ -7,6 +7,7 @@ that integrate seamlessly with Fenrir's ASGI pipeline.
 from __future__ import annotations
 
 import gzip
+import json
 import logging
 import time
 import uuid
@@ -57,9 +58,14 @@ class CORSMiddleware:
     def _get_cors_headers(self, origin: Optional[str], is_preflight: bool = False) -> Dict[str, str]:
         headers: Dict[str, str] = {}
         if origin and self._is_origin_allowed(origin):
-            headers["access-control-allow-origin"] = origin
+            # When credentials are allowed with wildcard origins, echo the
+            # specific origin per CORS spec (browsers reject "*" with credentialed requests).
+            if self._all_origins and self.allow_credentials:
+                headers["access-control-allow-origin"] = origin
+            else:
+                headers["access-control-allow-origin"] = origin
             headers["vary"] = "Origin"
-        elif self._all_origins:
+        elif self._all_origins and not self.allow_credentials:
             headers["access-control-allow-origin"] = "*"
 
         if self.allow_credentials:
@@ -180,9 +186,11 @@ class GZipMiddleware:
 
     def _is_compressible(self, content_type: str) -> bool:
         ct = content_type.split(";")[0].strip().lower()
-        for compressible in self.COMPRESSIBLE_TYPES:
-            if ct == compressible or ct.startswith(compressible.split("/")[0] + "/"):
-                return True
+        if ct in self.COMPRESSIBLE_TYPES:
+            return True
+        # Allow text/* and application/json-adjacent types
+        if ct.startswith("text/"):
+            return True
         return False
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
@@ -204,9 +212,11 @@ class GZipMiddleware:
         initial_message: Optional[Dict[str, Any]] = None
         content_type_value = ""
         bypass = False
+        is_streaming = False
+        headers_sent = False
 
         async def send_wrapper(message: Dict[str, Any]) -> None:
-            nonlocal initial_message, content_type_value, bypass
+            nonlocal initial_message, content_type_value, bypass, is_streaming, headers_sent
 
             if message["type"] == "http.response.start":
                 status = message.get("status", 200)
@@ -228,35 +238,67 @@ class GZipMiddleware:
 
             if message["type"] == "http.response.body":
                 chunk = message.get("body", b"")
-                body_chunks.append(chunk)
-                if not message.get("more_body", False):
-                    full_body = b"".join(body_chunks)
-                    if (
-                        len(full_body) >= self.minimum_size
-                        and self._is_compressible(content_type_value)
-                    ):
-                        compressed = gzip.compress(full_body, compresslevel=self.compresslevel)
-                        hdrs = dict(initial_message.get("headers", []))
-                        hdrs[b"content-length"] = str(len(compressed)).encode("latin-1")
-                        hdrs[b"content-encoding"] = b"gzip"
-                        hdrs.pop(b"transfer-encoding", None)
-                        await send({
-                            "type": "http.response.start",
-                            "status": initial_message.get("status", 200),
-                            "headers": list(hdrs.items()),
-                        })
-                        await send({
-                            "type": "http.response.body",
-                            "body": compressed,
-                            "more_body": False,
-                        })
+                more_body = message.get("more_body", False)
+
+                if more_body:
+                    if not is_streaming and len(body_chunks) == 0:
+                        is_streaming = True
+
+                    if is_streaming and chunk:
+                        if not headers_sent:
+                            hdrs = dict(initial_message.get("headers", []))
+                            if self._is_compressible(content_type_value):
+                                hdrs[b"content-encoding"] = b"gzip"
+                            hdrs.pop(b"content-length", None)
+                            hdrs.pop(b"transfer-encoding", None)
+                            await send({
+                                "type": "http.response.start",
+                                "status": initial_message.get("status", 200),
+                                "headers": list(hdrs.items()),
+                            })
+                            headers_sent = True
+                        if self._is_compressible(content_type_value) and len(chunk) >= self.minimum_size:
+                            chunk = gzip.compress(chunk, compresslevel=self.compresslevel)
+                        await send({"type": "http.response.body", "body": chunk, "more_body": True})
                     else:
-                        await send(initial_message)
-                        await send({
-                            "type": "http.response.body",
-                            "body": full_body,
-                            "more_body": False,
-                        })
+                        body_chunks.append(chunk)
+                    return
+
+                # Final chunk
+                body_chunks.append(chunk)
+                full_body = b"".join(body_chunks)
+
+                # Streaming already sent headers — just send the final body
+                if headers_sent:
+                    await send({"type": "http.response.body", "body": full_body, "more_body": False})
+                    return
+
+                if (
+                    len(full_body) >= self.minimum_size
+                    and self._is_compressible(content_type_value)
+                ):
+                    compressed = gzip.compress(full_body, compresslevel=self.compresslevel)
+                    hdrs = dict(initial_message.get("headers", []))
+                    hdrs[b"content-length"] = str(len(compressed)).encode("latin-1")
+                    hdrs[b"content-encoding"] = b"gzip"
+                    hdrs.pop(b"transfer-encoding", None)
+                    await send({
+                        "type": "http.response.start",
+                        "status": initial_message.get("status", 200),
+                        "headers": list(hdrs.items()),
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": compressed,
+                        "more_body": False,
+                    })
+                else:
+                    await send(initial_message)
+                    await send({
+                        "type": "http.response.body",
+                        "body": full_body,
+                        "more_body": False,
+                    })
                 return
 
             await send(message)
@@ -396,23 +438,25 @@ class RateLimitMiddleware:
     async def _is_rate_limited_redis(self, key: str) -> Tuple[bool, float]:
         """Distributed rate limiting using Redis sliding window."""
         import time as _time
-        import uuid
         now = _time.monotonic()
         window_start = now - self.window_seconds
-        unique_id = f"{now}:{uuid.uuid4().hex[:8]}"
         pipe = self._redis.pipeline()
         pipe.zremrangebyscore(key, 0, window_start)
-        pipe.zadd(key, {unique_id: now})
         pipe.zcard(key)
-        pipe.expire(key, self.window_seconds)
         results = await pipe.execute()
-        current_count = results[2]
+        current_count = results[1]
         if current_count >= self.max_requests:
             oldest = await self._redis.zrange(key, 0, 0, withscores=True)
             if oldest:
                 retry_after = self.window_seconds - (now - oldest[0][1])
                 return True, max(retry_after, 0.0)
             return True, float(self.window_seconds)
+        # Only add the request AFTER confirming it's allowed
+        unique_id = f"{now}:{uuid.uuid4().hex[:8]}"
+        add_pipe = self._redis.pipeline()
+        add_pipe.zadd(key, {unique_id: now})
+        add_pipe.expire(key, self.window_seconds)
+        await add_pipe.execute()
         return False, 0.0
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
@@ -439,6 +483,183 @@ class RateLimitMiddleware:
                 "headers": headers,
             })
             body = f'{{"detail":"Rate limit exceeded. Try again in {int(retry_after)+1} seconds."}}'
+            await send({"type": "http.response.body", "body": body.encode("utf-8")})
+            return
+
+        await self.app(scope, receive, send)
+
+
+class BodyLimitMiddleware:
+    """ASGI middleware that rejects requests exceeding a maximum body size.
+
+    Prevents denial-of-service attacks via large request bodies.
+
+    Usage::
+
+        app.add_middleware(BodyLimitMiddleware, max_content_length=1_048_576)  # 1 MB
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        max_content_length: int = 10_485_760,  # 10 MB default
+        status_code: int = 413,
+    ) -> None:
+        self.app = app
+        self.max_content_length = max_content_length
+        self.status_code = status_code
+
+    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Check Content-Length header first (fast path)
+        content_length = 0
+        has_content_length = False
+        for k, v in scope.get("headers", []):
+            if k == b"content-length":
+                try:
+                    content_length = int(v.decode("latin-1"))
+                    has_content_length = True
+                except (ValueError, TypeError):
+                    content_length = 0
+                break
+
+        if has_content_length and content_length > self.max_content_length:
+            body = json.dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
+            await send({
+                "type": "http.response.start",
+                "status": self.status_code,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body.encode("utf-8")})
+            return
+
+        # For chunked or unknown-length bodies, monitor actual size
+        total_received = 0
+        exceeded = False
+
+        async def monitored_receive():
+            nonlocal total_received, exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                chunk = message.get("body", b"")
+                total_received += len(chunk)
+                if total_received > self.max_content_length and not exceeded:
+                    exceeded = True
+            return message
+
+        # Wrap send to reject if body exceeded
+        async def guarded_send(message):
+            if exceeded and message["type"] == "http.response.start":
+                body = json.dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
+                await send({
+                    "type": "http.response.start",
+                    "status": self.status_code,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode("latin-1")),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body.encode("utf-8")})
+                return
+            await send(message)
+
+        await self.app(scope, monitored_receive, guarded_send)
+
+
+class CSRFMiddleware:
+    """ASGI middleware that enforces CSRF token validation for state-changing methods.
+
+    Reads the CSRF token from the ``X-CSRF-Token`` header and validates it
+    against the ``_csrf_token`` cookie.  Safe methods (GET, HEAD, OPTIONS)
+    are always allowed through.
+
+    When ``auto_generate=True`` (default), a CSRF token cookie is injected
+    into every safe-method response so clients can read it and send it back
+    in subsequent state-changing requests.
+
+    Usage::
+
+        app.add_middleware(CSRFMiddleware, secret_key="my-secret")
+    """
+
+    SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    def __init__(
+        self,
+        app: Callable,
+        secret_key: str = "",
+        cookie_name: str = "_csrf_token",
+        header_name: str = "X-CSRF-Token",
+        safe_methods: Optional[frozenset] = None,
+        auto_generate: bool = True,
+    ) -> None:
+        self.app = app
+        self.secret_key = secret_key
+        self.cookie_name = cookie_name
+        self.header_name = header_name
+        self.safe_methods = safe_methods or self.SAFE_METHODS
+        self.auto_generate = auto_generate
+
+    def _generate_token(self) -> str:
+        import hmac
+        import hashlib
+        import time
+        import secrets
+        if self.secret_key:
+            ts = str(int(time.time()))
+            return hmac.new(self.secret_key.encode(), ts.encode(), hashlib.sha256).hexdigest()
+        return secrets.token_hex(32)
+
+    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "").upper()
+        if method in self.safe_methods:
+            if self.auto_generate:
+                token = self._generate_token()
+                async def send_with_csrf(message: Dict[str, Any]) -> None:
+                    if message["type"] == "http.response.start":
+                        headers = dict(message.get("headers", []))
+                        cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax"
+                        headers[b"set-cookie"] = cookie_val.encode("latin-1")
+                        message["headers"] = list(headers.items())
+                    await send(message)
+                await self.app(scope, receive, send_with_csrf)
+            else:
+                await self.app(scope, receive, send)
+            return
+
+        # Extract CSRF token from header
+        header_token = None
+        cookie_token = None
+        for k, v in scope.get("headers", []):
+            if k == self.header_name.lower().encode():
+                header_token = v.decode("latin-1")
+            if k == b"cookie":
+                cookie_str = v.decode("latin-1")
+                for part in cookie_str.split(";"):
+                    part = part.strip()
+                    if part.startswith(f"{self.cookie_name}="):
+                        cookie_token = part.split("=", 1)[1]
+
+        if not header_token or not cookie_token or header_token != cookie_token:
+            body = json.dumps({"detail": "CSRF token missing or invalid."})
+            await send({
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            })
             await send({"type": "http.response.body", "body": body.encode("utf-8")})
             return
 

@@ -1,5 +1,4 @@
 from fenrir.app import Fenrir as Sanic
-from fenrir.app import Blueprint
 from fenrir.exceptions import (
     HTTPException as SanicException,
     HTTPBadRequest as BadRequest,

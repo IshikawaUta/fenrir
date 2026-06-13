@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="1.0.0")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.0.0")
 
 # --- 1. FastAPI-style Pydantic Validation & Dependency Injection ---
 class UserRegister(BaseModel):

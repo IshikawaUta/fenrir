@@ -53,7 +53,12 @@ class Response:
 
     @property
     def text(self) -> Optional[str]:
-        return self._body.decode("utf-8") if self._body else None
+        if self._body is None:
+            return None
+        try:
+            return self._body.decode("utf-8")
+        except (UnicodeDecodeError, AttributeError):
+            return None
 
     @text.setter
     def text(self, value: Optional[str]):
@@ -117,6 +122,9 @@ class Response:
         if max_age is not None:
             cookie["max-age"] = max_age
         if expires is not None:
+            if isinstance(expires, int):
+                import datetime
+                expires = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=expires)).strftime("%a, %d %b %Y %H:%M:%S GMT")
             cookie["expires"] = expires
         if path:
             cookie["path"] = path

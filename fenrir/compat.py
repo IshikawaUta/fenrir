@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import sys
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -74,7 +75,10 @@ class WsgiToAsgi:
         environ["wsgi.input"] = io.BytesIO(body)
         environ["CONTENT_LENGTH"] = str(len(body))
 
-        # Collect WSGI response via start_response callback
+        # Run WSGI app in thread so sync WSGI doesn't block event loop
+        loop = asyncio.get_running_loop()
+
+        # Collect WSGI response body via start_response callback
         status_code = [200]
         response_headers: List = []
 
@@ -85,20 +89,19 @@ class WsgiToAsgi:
                 for k, v in headers
             ]
 
-        # Run WSGI app in thread so sync WSGI doesn't block event loop
-        loop = asyncio.get_running_loop()
-        response_iter: Iterable[bytes] = await loop.run_in_executor(
-            None, lambda: self.wsgi_app(environ, start_response)
-        )
+        # Run WSGI app + iterate response body in a single thread call
+        def _run_wsgi():
+            resp_iter = self.wsgi_app(environ, start_response)
+            body = b""
+            try:
+                for chunk in resp_iter:
+                    body += chunk
+            finally:
+                if hasattr(resp_iter, "close"):
+                    resp_iter.close()
+            return body
 
-        # Collect response body
-        response_body = b""
-        try:
-            for chunk in response_iter:
-                response_body += chunk
-        finally:
-            if hasattr(response_iter, "close"):
-                response_iter.close()  # type: ignore[union-attr]
+        response_body: bytes = await loop.run_in_executor(None, _run_wsgi)
 
         # Send ASGI response
         await send(
@@ -163,7 +166,7 @@ def install_bottle_compat() -> None:
 
     if "bottle" not in sys.modules:
         sys.modules["bottle"] = _bottle
-        _bottle.__path__ = []  # type: ignore[attr-defined]
+        _bottle.__path__ = [os.path.dirname(_bottle.__file__)]  # type: ignore[attr-defined]
 
         # Patch __module__ so repr() shows 'bottle.*' not 'fenrir.bottle.*'
         for _name, _obj in list(_bottle.__dict__.items()):

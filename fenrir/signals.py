@@ -43,8 +43,10 @@ class Signal:
                         loop = asyncio.get_running_loop()
                         task = loop.create_task(receiver(sender, **kwargs))
                         task.add_done_callback(_handle_signal_error)
+                        results.append((receiver, task))
                     except RuntimeError:
-                        asyncio.run(receiver(sender, **kwargs))
+                        # No running loop — schedule for later
+                        logger.debug("No event loop running; async signal receiver '%s' skipped.", getattr(receiver, '__name__', receiver))
                 else:
                     res = receiver(sender, **kwargs)
                     results.append((receiver, res))

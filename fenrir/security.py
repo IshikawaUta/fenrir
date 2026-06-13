@@ -291,7 +291,11 @@ class HTTPDigest(HTTPBase):
             if self.auto_error:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             return None
-        return auth
+        # Parse digest header into a dict of key=value pairs
+        import re
+        digest_part = auth[7:]  # strip "Digest "
+        parts = re.findall(r'(\w+)=(?:"([^"]+)"|([^\s,]+))', digest_part)
+        return {k: v or v2 for k, v, v2 in parts}
 
 
 class OAuth2(SecurityBase):

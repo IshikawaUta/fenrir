@@ -1,11 +1,32 @@
 import inspect
-import asyncio
-from typing import Any, Callable, Dict, Optional, Type, List, Union, cast
+from typing import Any, Callable, Dict, Optional, cast
 from fenrir.compat import Annotated, to_thread, get_origin, get_args
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from fenrir.exceptions import HTTPUnprocessableEntity
 from fenrir.request import Request
 from fenrir.response import Response
+
+# Module-level cache for inspect.signature() results — avoids repeated
+# signature introspection on every request for every handler/dependency.
+_signature_cache: Dict[Callable, inspect.Signature] = {}
+
+
+def _get_cached_signature(func: Callable) -> inspect.Signature:
+    """Return a cached inspect.Signature for *func*."""
+    try:
+        return _signature_cache[func]
+    except (KeyError, TypeError):
+        # TypeError: func is not hashable (e.g. a lambda bound to a local)
+        pass
+    try:
+        sig = inspect.signature(func)
+    except (ValueError, TypeError):
+        raise
+    try:
+        _signature_cache[func] = sig
+    except TypeError:
+        pass  # unhashable func — don't cache
+    return sig
 
 class ParamInfo:
     def __init__(self, default: Any = None, alias: str = None):
@@ -69,7 +90,7 @@ async def resolve_parameters(
     ws: Any = None,
     resolving_set: set = None,
 ) -> Dict[str, Any]:
-    sig = inspect.signature(func)
+    sig = _get_cached_signature(func)
     resolved = {}
     
     if resolving_set is None:
@@ -360,6 +381,8 @@ async def resolve_parameters(
                 source = "cookie"
             elif isinstance(default, Query):
                 source = "query"
+        elif default is not inspect.Parameter.empty:
+            default_val = default
                 
         lookup_key = alias or param_name
         if source == "header" and not alias:

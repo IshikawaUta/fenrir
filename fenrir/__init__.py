@@ -53,6 +53,8 @@ from fenrir.middleware import (
     GZipMiddleware,
     RequestIDMiddleware,
     RateLimitMiddleware,
+    BodyLimitMiddleware,
+    CSRFMiddleware,
 )
 from fenrir.pool import ConnectionPool, DatabasePool
 from fenrir.http2 import HTTP2Push
@@ -68,7 +70,7 @@ from fenrir.sessions import (
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "2.3.5"
+__version__ = "3.0.0"
 __all__ = [
     # Core app
     "Fenrir",
@@ -166,6 +168,8 @@ __all__ = [
     "GZipMiddleware",
     "RequestIDMiddleware",
     "RateLimitMiddleware",
+    "BodyLimitMiddleware",
+    "CSRFMiddleware",
     # Pagination
     "PaginationParams",
     "paginate",
