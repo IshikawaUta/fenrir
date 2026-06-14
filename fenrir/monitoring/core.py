@@ -209,8 +209,8 @@ def check_site_health(url: str) -> Dict[str, Any]:
 
 async def check_site_health_async(url: str) -> Dict[str, Any]:
     """Check the health of a single site (async wrapper using thread pool)."""
-    import asyncio
-    return await asyncio.to_thread(check_site_health, url)
+    from fenrir.compat import to_thread
+    return await to_thread(check_site_health, url)
 
 
 def get_uptime_stats() -> Dict[str, Any]:
