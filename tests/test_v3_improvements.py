@@ -1,5 +1,5 @@
 """
-Tests covering previously untested gaps and v3.1.0 improvements.
+Tests covering previously untested gaps and v3.1.1 improvements.
 
 Covers:
   - PATCH/PUT/DELETE method routing
