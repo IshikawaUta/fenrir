@@ -165,6 +165,7 @@ def cmd_run(args):
             num_workers=args.workers,
             binds=[f"{args.host}:{args.port}"],
             reload=reload_mode,
+            disable_dashboard=args.disable_dashboard,
         )
         arbiter.start()
     except KeyboardInterrupt:
@@ -362,7 +363,7 @@ def cmd_new(args):
 import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="3.0.0")
+app = Fenrir(title="My Fenrir Application", version="3.1.0")
 
 @app.get("/")
 async def home():
@@ -669,7 +670,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v3.0.0</span>
+                <span class="info-value">Fenrir v3.1.0</span>
             </div>
         </div>
 
@@ -708,6 +709,80 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\033[31mError during scaffolding: {e}\033[0m")
         sys.exit(1)
+
+
+def _update_env_var(key: str, value: str):
+    """Update or add a variable in the .env file."""
+    env_file = os.path.join(os.getcwd(), ".env")
+    lines = []
+    found = False
+    
+    if os.path.exists(env_file):
+        with open(env_file, "r") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and stripped.split("=", 1)[0] == key:
+                    lines.append(f"{key}={value}\n")
+                    found = True
+                else:
+                    lines.append(line)
+    
+    if not found:
+        lines.append(f"{key}={value}\n")
+    
+    with open(env_file, "w") as f:
+        f.writelines(lines)
+
+
+def cmd_monitoring(args):
+    """Monitoring enable/disable/status command handler."""
+    print_banner("Fenrir Monitoring")
+    
+    if args.monitoring_action == "enable":
+        _update_env_var("MONITORING_ENABLED", "true")
+        print("\033[92mMonitoring dashboard enabled.\033[0m")
+        print("\033[36mConfigure credentials in .env:\033[0m")
+        print("  MONITORING_USER=admin")
+        print("  MONITORING_PASSWORD=changeme")
+        print("  MONITORING_SECRET_KEY=<random-secret>")
+        print("\n\033[36mRestart your server to apply changes.\033[0m")
+        
+    elif args.monitoring_action == "disable":
+        _update_env_var("MONITORING_ENABLED", "false")
+        print("\033[33mMonitoring dashboard disabled.\033[0m")
+        print("\033[36mRestart your server to apply changes.\033[0m")
+        
+    elif args.monitoring_action == "status":
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+        
+        enabled = os.getenv("MONITORING_ENABLED", "false").lower() == "true"
+        user = os.getenv("MONITORING_USER", "admin")
+        sites = os.getenv("MONITORING_SITES", "http://localhost:8000")
+        
+        status_color = "\033[92mENABLED\033[0m" if enabled else "\033[33mDISABLED\033[0m"
+        print(f"\033[36mStatus:\033[0m    {status_color}")
+        print(f"\033[36mUser:\033[0m      {user}")
+        print(f"\033[36mSites:\033[0m     {sites}")
+        print(f"\033[36mEndpoint:\033[0m  /monitoring")
+        
+    elif args.monitoring_action == "set-password":
+        import getpass
+        password = getpass.getpass("\033[36mEnter new monitoring password:\033[0m ")
+        if not password:
+            print("\033[31mPassword cannot be empty.\033[0m")
+            return
+        _update_env_var("MONITORING_PASSWORD", password)
+        
+        import secrets
+        secret_key = secrets.token_hex(32)
+        _update_env_var("MONITORING_SECRET_KEY", secret_key)
+        
+        print("\033[92mPassword updated successfully.\033[0m")
+        print("\033[36mRestart your server to apply changes.\033[0m")
 
 
 def cmd_info(args):
@@ -825,6 +900,7 @@ def main():
     run_parser.add_argument("-w", "--workers", type=int, default=1, help="Number of workers [default: 1]")
     run_parser.add_argument("-d", "--dev", action="store_true", help="Run in development mode (with auto-reload)")
     run_parser.add_argument("--reload", action="store_true", help="Restart workers on code changes.")
+    run_parser.add_argument("--disable-dashboard", action="store_true", help="Disable Asteri built-in dashboard (/asteri-status)")
     run_parser.set_defaults(func=cmd_run)
     
     # 2. Routes subcommand
@@ -855,6 +931,17 @@ def main():
     info_parser = subparsers.add_parser("info", help="Display environment, dependency status, and application details.")
     info_parser.add_argument("target", nargs="?", default=None, help="Optional app path in format 'module:app' or 'app.py'.")
     info_parser.set_defaults(func=cmd_info)
+    
+    # 7. Monitoring subcommand
+    monitoring_parser = subparsers.add_parser("monitoring", help="Manage the built-in monitoring dashboard.")
+    monitoring_sub = monitoring_parser.add_subparsers(dest="monitoring_action", required=True)
+    
+    monitoring_sub.add_parser("enable", help="Enable the monitoring dashboard.")
+    monitoring_sub.add_parser("disable", help="Disable the monitoring dashboard.")
+    monitoring_sub.add_parser("status", help="Show monitoring configuration status.")
+    monitoring_sub.add_parser("set-password", help="Set a new monitoring dashboard password.")
+    
+    monitoring_parser.set_defaults(func=cmd_monitoring)
     
     args = parser.parse_args()
     args.func(args)

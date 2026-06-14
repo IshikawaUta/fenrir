@@ -1,3 +1,4 @@
+import os
 import logging
 from pydantic import BaseModel
 from fenrir import (
@@ -12,13 +13,26 @@ from fenrir import (
     Response,
     HTTPBadRequest,
 )
+from fenrir.features import init_fenrir_monitoring
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.0.0")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.0")
+
+# --- Enable Built-in Features ---
+# Monitoring Dashboard: /monitoring (login: admin/changeme)
+# Configure via .env or CLI: fenrir monitoring enable
+init_fenrir_monitoring(app)
 
 # --- 1. FastAPI-style Pydantic Validation & Dependency Injection ---
 class UserRegister(BaseModel):
@@ -157,5 +171,16 @@ async def trigger_error():
 
 # --- 7. Bottle-style Built-in Server Runner (runs programmatically via Asteri) ---
 if __name__ == "__main__":
+    monitoring_enabled = os.getenv("MONITORING_ENABLED", "false").lower() == "true"
+    
     logger.info("Starting Fenrir Web Application...")
+    logger.info(f"  Monitoring: {'ENABLED at /monitoring' if monitoring_enabled else 'DISABLED (run: fenrir monitoring enable)'}")
+    logger.info("")
+    logger.info("CLI Commands:")
+    logger.info("  fenrir monitoring enable       - Enable monitoring dashboard")
+    logger.info("  fenrir monitoring disable      - Disable monitoring dashboard")
+    logger.info("  fenrir monitoring set-password - Set dashboard password")
+    logger.info("  fenrir run app --disable-dashboard - Disable Asteri built-in dashboard")
+    logger.info("")
+    
     app.run(host="127.0.0.1", port=8000, workers=2, app_path="demo_app:app")

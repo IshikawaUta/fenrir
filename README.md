@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-614%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-669%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -63,15 +63,17 @@ pip install -e .
 *   **🗜️ Streaming GZip Compression**: `GZipMiddleware` compresses each chunk on-the-fly for `StreamingResponse`, with default compression level 6 (optimal CPU/ratio trade-off).
 *   **⚡ Signature & Schema Caching**: `inspect.signature()` and OpenAPI schema are cached for faster repeated requests.
 *   **🛠️ Premium CLI Tooling**: Visual route tables, interactive app shell, in-memory benchmarking suite, project scaffolding, and environment system inspection.
+*   **📊 Built-in Monitoring Dashboard**: Health checks, traffic analysis, error rates, alerts, uptime stats, response time history, and hourly traffic with secure bcrypt authentication.
 *   **🐍 Python 3.8–3.13 Compatible**: Full backward compatibility ensured via `typing_extensions` polyfills for `Annotated`, `get_origin`, `get_args`; and a `contextvars`-aware `asyncio.to_thread` shim.
 
 ---
 
 ## 🚀 Quick Start (The Hybrid Power)
 
-Here is a simple example (`demo_app.py`) showcasing how Flask, FastAPI, Falcon, and Sanic styles coexist harmoniously in a single application:
+Here is a simple example (`demo_app.py`) showcasing how Flask, FastAPI, Falcon, and Sanic styles coexist harmoniously in a single application with built-in monitoring:
 
 ```python
+import os
 import logging
 from pydantic import BaseModel
 from fenrir import (
@@ -79,14 +81,28 @@ from fenrir import (
     render_template, Response, Form, File, UploadFile,
     WebSocket, WebSocketDisconnect
 )
+from fenrir.features import init_fenrir_monitoring
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
-# Initialize the Hybrid App
-app = Fenrir(title="Fenrir Hybrid Demo", version="3.0.0")
+# Initialize App
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.0")
 
-# --- 1. FastAPI-Style Validation & DI ---
+# --- Enable Built-in Features ---
+# Monitoring Dashboard: /monitoring (login: admin/changeme)
+# Configure via .env or CLI: fenrir monitoring enable
+init_fenrir_monitoring(app)
+
+# --- 1. FastAPI-style Pydantic Validation & Dependency Injection ---
 class UserRegister(BaseModel):
     username: str
     email: str
@@ -94,43 +110,119 @@ class UserRegister(BaseModel):
 
 async def verify_api_key(x_api_key: str = Header(default=None)):
     if x_api_key != "super-secret-key":
-        logger.warning("Invalid API key attempt")
+        logger.warning("Invalid API key provided!")
     return x_api_key
 
-# --- 2. Flask-Style Routing & Context-Locals ---
+# --- 2. Flask-style Decorators, Context-Locals, and Templating ---
 @app.get("/")
 async def home():
-    name = request.args.get("name", "Fenrir Developer")
+    name = request.args.get("name", "Fenrir User")
     return render_template("index.html", name=name)
 
-# --- 3. Falcon-Style Class-Based Resources ---
+# Form & File Upload Endpoint
+@app.post("/upload")
+async def handle_upload(
+    title: str = Form(),
+    file: UploadFile = File()
+):
+    content = await file.read()
+    return {
+        "title": title,
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "size": len(content)
+    }
+
+# WebSocket Echo Endpoint
+@app.websocket("/ws/chat")
+async def chat_ws(ws: WebSocket):
+    await ws.accept()
+    try:
+        while True:
+            msg = await ws.receive_text()
+            await ws.send_text(f"Fenrir Chat Echo: {msg}")
+    except WebSocketDisconnect:
+        logger.info("Chat WebSocket disconnected")
+
+# --- 3. Falcon-style Class-based Resources ---
 class ItemResource:
     async def on_get(self, req, resp, item_id: int):
         resp.status = 200
-        resp.media = {"item_id": item_id, "style": "Falcon Resource"}
+        resp.media = {
+            "item_id": item_id,
+            "status": "active",
+            "msg": f"Fetched item {item_id} (Falcon Resource style)"
+        }
+
+    async def on_post(self, req, resp, item_id: int):
+        data = req.json
+        resp.status = 201
+        resp.media = {
+            "item_id": item_id,
+            "received_body": data,
+            "msg": f"Created sub-item for item {item_id} (Falcon Resource style)"
+        }
 
 app.add_route("/items/<item_id:int>", ItemResource())
 
-# --- 4. Sanic-Style Listeners & Background Tasks ---
+# --- 4. Sanic-style Listeners and Middlewares ---
 @app.listener("before_server_start")
 async def setup_db(app_instance):
-    logger.info("Initializing mock database...")
+    logger.info("[Listener] Initializing mock database connection pool...")
+    app_instance.db_pool = "Connected"
+
+@app.listener("after_server_stop")
+async def teardown_db(app_instance):
+    logger.info("[Listener] Closing database connection pool...")
 
 @app.middleware("request")
-async def log_request(req):
-    logger.info(f"Incoming: {req.method} {req.path}")
-    g.user_role = "guest"  # Share state using Flask-style 'g'
+async def log_request_path(req):
+    logger.info(f"[Middleware] Request received: {req.method} {req.path}")
+    g.user_type = "guest"
 
-# Run with Asteri ASGI server
+@app.middleware("response")
+async def add_custom_powered_by(req, resp):
+    logger.info(f"[Middleware] Response sent: {resp.status}")
+    resp.headers["X-Powered-By"] = "Fenrir Framework"
+
+# --- 5. Flask/Sanic-style Blueprint modular routing ---
+api_bp = Blueprint("api", url_prefix="/api")
+
+@api_bp.post("/register")
+async def register_user(
+    body: UserRegister,
+    api_key: str = Depends(verify_api_key),
+    role: str = Query(default="member")
+):
+    return {
+        "status": "success",
+        "user_type": g.user_type,
+        "role": role,
+        "api_key_used": api_key,
+        "registered_user": body.model_dump()
+    }
+
+app.register_blueprint(api_bp)
+
+# --- 6. Custom Exception Handler ---
+@app.exception(ValueError)
+async def handle_value_error(req, exc):
+    return Response(f"Custom Value Error: {exc}", status=400)
+
+@app.get("/trigger-error")
+async def trigger_error():
+    raise ValueError("Something went wrong!")
+
+# --- 7. Run with Asteri ASGI Server ---
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, workers=2)
+    app.run(host="127.0.0.1", port=8000, workers=2, app_path="demo_app:app")
 ```
 
 ---
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v3.0.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v3.1.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -288,6 +380,7 @@ fenrir run demo_app:app --port 8000 --dev
     *   `-p`, `--port`: Port number (default: `8000`).
     *   `-w`, `--workers`: Number of concurrent workers (default: `1`).
     *   `-d`, `--dev` / `--reload`: Active development mode with auto-reload.
+    *   `--disable-dashboard`: Disable Asteri built-in dashboard (`/asteri-status`).
 
 ### 2. `fenrir routes`
 Print a beautiful, colorized structural table of all registered HTTP endpoints, methods, matching handlers, and associated blueprints.
@@ -321,11 +414,59 @@ Inspect the environment including Python details, OS details, Pydantic/Asteri ve
 fenrir info demo_app:app
 ```
 
+### 7. `fenrir monitoring`
+Manage the built-in monitoring dashboard for health checks and traffic analysis.
+```bash
+fenrir monitoring enable     # Enable monitoring dashboard
+fenrir monitoring disable    # Disable monitoring dashboard
+fenrir monitoring status     # Show monitoring configuration
+fenrir monitoring set-password  # Set new dashboard password
+```
+
+**Default credentials:**
+- Username: `admin`
+- Password: `changeme`
+
+> **Note:** Change the default password in production using `fenrir monitoring set-password` or set `MONITORING_PASSWORD` in `.env` file.
+
+---
+
+## 📊 Monitoring API Endpoints
+
+All endpoints require authentication via monitoring token cookie.
+
+### `GET /monitoring/api/stats`
+Returns traffic stats, site counts, and uptime start time.
+
+### `GET /monitoring/api/traffic`
+Returns today/yesterday traffic comparison.
+
+### `GET /monitoring/api/alerts?limit=50`
+Returns recent alerts (limit: 1-500, default 50).
+
+### `GET /monitoring/api/health`
+Triggers health check on all monitored sites.
+
+### `GET /monitoring/api/uptime`
+Returns uptime percentage for each monitored site.
+
+### `GET /monitoring/api/response-times?url=...&hours=24`
+Returns response time history for a specific site (max 168 hours).
+
+### `GET /monitoring/api/hourly?hours=24`
+Returns hourly traffic breakdown (max 720 hours).
+
+### `GET /monitoring/api/summary`
+Returns comprehensive summary with overview, sites, alerts, and hourly traffic.
+
+### `POST /monitoring/api/check`
+Check health of a specific site: `{"url": "http://example.com"}`
+
 ---
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **614 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, and all v3.0.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **669 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), and all v3.1.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -335,12 +476,36 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-=============================== 614 passed, 1 skipped in 16.62s ===============================
+=============================== 669 passed, 1 skipped in 36.36s ===============================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v3.1.0 — Monitoring Features
+
+Added built-in monitoring dashboard:
+
+**New Features:**
+- Monitoring dashboard with health checks, traffic analysis, and alerts
+- CLI commands for enable/disable monitoring
+- bcrypt password hashing for secure authentication
+- Async health checks using thread pool
+- Uptime statistics endpoint (`/monitoring/api/uptime`)
+- Response time history endpoint (`/monitoring/api/response-times`)
+- Hourly traffic breakdown endpoint (`/monitoring/api/hourly`)
+- Comprehensive summary endpoint (`/monitoring/api/summary`)
+- Enhanced dashboard with uptime percentage display
+- `--disable-dashboard` flag for Asteri built-in dashboard
+
+**Bug Fixes:**
+- Fixed unused import in monitoring routes
+- Fixed invalid integer parsing in alerts API
+- Fixed blocking call in health check (now async)
+- Fixed Response constructor parameter mismatch
+
+---
 
 ### v3.0.0 — Major Bug Fix & Architecture Release
 

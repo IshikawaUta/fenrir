@@ -49,25 +49,26 @@ htmlcov/
 poetry.lock
 pdm.lock
 pipfile.lock
-.requirements.txt
-requirements.txt
-requirements_dev.txt
-requirements-dev.txt
-cov.xml
-coverage.xml
 .coverage
 .coverage.*
+cov.xml
+coverage.xml
 nosetests.xml
 dep_graph.png
 
 # Environments
 .env
+.env.local
+.env.*.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Fenrir monitoring data
+.fenrir_monitoring/
 
 # IDE / Editors
 .vscode/

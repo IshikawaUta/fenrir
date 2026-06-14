@@ -65,12 +65,14 @@ from fenrir.sessions import (
     InMemorySessionBackend,
     ServerSideSession,
 )
+from fenrir.monitoring.core import init_monitoring, record_request, check_site_health, check_site_health_async, get_traffic_stats
+from fenrir.features import init_fenrir_monitoring
 
 
 # Re-export Annotated for convenient use with param markers
 from fenrir.compat import Annotated
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 __all__ = [
     # Core app
     "Fenrir",
@@ -184,5 +186,13 @@ __all__ = [
     "InMemorySessionInterface",
     "InMemorySessionBackend",
     "ServerSideSession",
+    # Monitoring
+    "init_monitoring",
+    "record_request",
+    "check_site_health",
+    "check_site_health_async",
+    "get_traffic_stats",
+    # Features
+    "init_fenrir_monitoring",
 ]
 
