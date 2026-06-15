@@ -28,7 +28,7 @@ class TestInitFenrirMonitoring:
         assert any("/monitoring" in r for r in routes)
 
     async def test_enables_when_kwarg_true(self, app):
-        with patch.dict(os.environ, {"MONITORING_ENABLED": "false"}):
+        with patch.dict(os.environ, {"MONITORING_ENABLED": "false", "MONITORING_PASSWORD": "testpass"}):
             init_fenrir_monitoring(app, enabled=True)
         routes = [r.path_pattern for r in app.router.routes]
         assert any("/monitoring" in r for r in routes)
