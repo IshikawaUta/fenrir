@@ -23,9 +23,9 @@ class SessionMixin(dict):
         self.modified = True
 
     def pop(self, key: Any, default: Any = None) -> Any:
-        res = super().pop(key, default)
-        self.modified = True
-        return res
+        if key in self:
+            self.modified = True
+        return super().pop(key, default)
 
     def update(self, *args: Any, **kwargs: Any):
         super().update(*args, **kwargs)
@@ -149,7 +149,14 @@ class RedisSessionInterface(SessionInterface):
                         future.set_exception(exc)
 
                 loop.create_task(_wrapper())
-                return future.result(timeout=5)
+                try:
+                    return future.result(timeout=5)
+                except concurrent.futures.TimeoutError:
+                    raise RuntimeError(
+                        "Redis session operation timed out. "
+                        "Ensure your Redis client supports sync operations "
+                        "or use a sync redis client (e.g., redis-py synchronous)."
+                    )
             else:
                 return loop.run_until_complete(coro_or_value)
         return coro_or_value

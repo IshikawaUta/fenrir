@@ -1,5 +1,5 @@
 """
-Tests for new features added to Fenrir v3.1.1:
+Tests for new features added to Fenrir v3.1.2:
 - Trie-based routing
 - Streaming request body
 - Streaming GZip compression

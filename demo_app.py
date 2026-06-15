@@ -18,7 +18,7 @@ from fenrir.features import init_fenrir_monitoring
 # Load environment variables from .env file
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(os.getcwd(), ".env"))
 except ImportError:
     pass
 
@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.1")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.2")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)

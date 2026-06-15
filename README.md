@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-669%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-706%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -95,7 +95,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.1")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.2")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -222,7 +222,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v3.1.1 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v3.1.2 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -466,7 +466,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **669 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), and all v3.1.1 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **706 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), and all v3.1.2 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -476,12 +476,56 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-=============================== 669 passed, 1 skipped in 36.36s ===============================
+=============================== 706 passed, 1 skipped in 22.50s ===============================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v3.1.2 — Security & Bug Fix Release
+
+**Security Fixes:**
+- Fixed monitoring dashboard authentication bypass (token validation)
+- Added authentication to all monitoring API endpoints
+- Fixed XSS vulnerabilities in monitoring dashboard HTML output
+- Added CSRF protection on monitoring login form
+- Fixed OpenAPI Swagger/ReDoc XSS via `openapi_url` parameter
+- Fixed Content-Disposition header injection via unescaped filename
+- Added token expiration (24 hours) for monitoring sessions
+
+**Bug Fixes:**
+- Fixed `.env` file not loaded when running via `fenrir` CLI (vs `python -m fenrir.cli`)
+- Fixed `response-times` API endpoint passing wrong argument to function
+- Fixed `int()` conversion without error handling causing 500 errors
+- Fixed config environment vars ignored when `enabled=True` passed
+- Fixed `body.decode()` crash on non-UTF-8 request bodies
+- Fixed default secret key hardcoded (now generates random if not set)
+- Fixed JSONResponse import error when used outside request context
+- Fixed `session.pop()` always marking session as modified
+- Fixed Redis session async deadlock with proper timeout error
+- Fixed `_load_data()` overwriting sites configuration
+- Fixed CSRF cookie not being sent back (changed path to `/`)
+- Fixed CSRF token not refreshed on failed login attempts
+
+**Improvements:**
+- Added `html.escape()` for all monitoring dashboard HTML output
+- Added `try/except` for query parameter int conversions
+- Added Secure cookie flag support via `MONITORING_SECURE_COOKIES` env var
+- Added health check URL validation (only configured sites allowed)
+- Added error handling for disk write failures in monitoring data
+- Added warning when default password is used
+- Added parallel health checks using `asyncio.gather()`
+- Added JavaScript `escapeHtml()` for client-side DOM injection
+- Added `MONITORING_ALLOW_DEFAULT_PASSWORD` env var override
+- Added OSError handling for monitoring data directory creation
+- Added `send_file()` streaming for large files via `FileResponse`
+- Added `DefaultJSONProvider` fallback for `JSONResponse` outside request context
+
+**Tests:**
+- Added 37 new tests covering security fixes and edge cases
+- Fixed all test warnings (deprecated per-request cookies in httpx)
+- Total test count: 706 (up from 669)
 
 ### v3.1.1 — Bug Fix Release
 

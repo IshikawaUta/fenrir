@@ -9,6 +9,7 @@ from fenrir.monitoring.core import (
     _hash_password,
     _verify_password,
     _generate_token,
+    _validate_token,
     record_request,
     check_site_health,
     get_traffic_stats,
@@ -22,8 +23,25 @@ from fenrir.monitoring.core import (
     get_response_time_history,
     get_hourly_traffic,
     get_summary,
+    _get_data_dir,
 )
 from fenrir.monitoring.routes import register_monitoring_routes, _parse_form
+
+
+MONITORING_ENV = {
+    "MONITORING_ENABLED": "true",
+    "MONITORING_USER": "admin",
+    "MONITORING_PASSWORD": "testpass",
+    "MONITORING_SECRET_KEY": "test-secret",
+}
+
+
+async def _login(client):
+    """Login and set auth cookies on the client."""
+    from fenrir.monitoring.core import _generate_token
+    token = _generate_token("admin", "test-secret")
+    client.client.cookies.set("monitoring_token", token)
+    return client
 
 
 # ── Core Functions ────────────────────────────────────────────────
@@ -53,7 +71,10 @@ class TestTokenGeneration:
     def test_generate_token_returns_string(self):
         token = _generate_token("admin", "secret")
         assert isinstance(token, str)
-        assert len(token) == 64  # SHA256 hex digest
+        assert ":" in token  # format: hash:expires_at
+        token_hash, expires_at = token.rsplit(":", 1)
+        assert len(token_hash) == 64  # SHA256 hex digest
+        assert int(expires_at) > 0
 
     def test_different_tokens_for_different_users(self):
         t1 = _generate_token("user1", "secret")
@@ -64,6 +85,36 @@ class TestTokenGeneration:
         t1 = _generate_token("admin", "secret1")
         t2 = _generate_token("admin", "secret2")
         assert t1 != t2
+
+
+class TestTokenValidation:
+    def test_valid_token(self):
+        token = _generate_token("admin", "secret")
+        assert _validate_token(token, "admin", "secret") is True
+
+    def test_expired_token(self):
+        token = "a" * 64 + ":1"
+        assert _validate_token(token, "admin", "secret") is False
+
+    def test_wrong_secret(self):
+        token = _generate_token("admin", "wrong_secret")
+        assert _validate_token(token, "admin", "correct_secret") is False
+
+    def test_wrong_user(self):
+        token = _generate_token("admin", "secret")
+        assert _validate_token(token, "user2", "secret") is False
+
+    def test_malformed_no_colon(self):
+        assert _validate_token("nocolon", "admin", "secret") is False
+
+    def test_malformed_non_numeric_expires(self):
+        assert _validate_token("hash:notanumber", "admin", "secret") is False
+
+    def test_empty_token(self):
+        assert _validate_token("", "admin", "secret") is False
+
+    def test_none_token(self):
+        assert _validate_token(None, "admin", "secret") is False
 
 
 class TestRecordRequest:
@@ -261,6 +312,74 @@ class TestSaveLoadData:
             assert len(_monitoring_data["alerts"]) == 1
 
 
+class TestInitMonitoring:
+    def test_raises_on_default_password_when_enabled(self):
+        app = Fenrir()
+        with patch.dict(os.environ, {
+            "MONITORING_ENABLED": "true",
+            "MONITORING_PASSWORD": "changeme",
+        }):
+            with pytest.raises(ValueError, match="MONITORING_PASSWORD must be set"):
+                init_monitoring(app)
+
+    def test_allows_default_password_with_override(self):
+        app = Fenrir()
+        with patch.dict(os.environ, {
+            "MONITORING_ENABLED": "true",
+            "MONITORING_PASSWORD": "changeme",
+            "MONITORING_ALLOW_DEFAULT_PASSWORD": "true",
+        }):
+            init_monitoring(app)
+            assert app.config["MONITORING_ENABLED"] is True
+
+    def test_no_error_when_disabled_with_default_password(self):
+        app = Fenrir()
+        with patch.dict(os.environ, {
+            "MONITORING_ENABLED": "false",
+            "MONITORING_PASSWORD": "changeme",
+        }):
+            init_monitoring(app)
+            assert app.config["MONITORING_ENABLED"] is False
+
+
+class TestGetDataDir:
+    def test_handles_oserror(self, tmp_path):
+        with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
+            result = _get_data_dir()
+            assert result.name == ".fenrir_monitoring"
+
+
+class TestTrafficEdgeCases:
+    def test_error_count_increments(self):
+        _monitoring_data["traffic_log"] = []
+        _monitoring_data["error_count"] = 0
+        record_request("/error", "GET", 500, 0.1)
+        assert _monitoring_data["error_count"] == 1
+
+    def test_traffic_log_truncated_at_5000(self):
+        _monitoring_data["traffic_log"] = [
+            {"path": "/", "method": "GET", "status_code": 200, "response_time": 0.01, "timestamp": "2024-01-01T00:00:00"}
+            for _ in range(5001)
+        ]
+        record_request("/new", "GET", 200, 0.01)
+        assert len(_monitoring_data["traffic_log"]) <= 5000
+
+
+class TestAlertEdgeCases:
+    def test_alerts_truncated_at_200(self):
+        _monitoring_data["alerts"] = [
+            {"title": f"Alert {i}", "message": "msg", "level": "info", "timestamp": "2024-01-01T00:00:00"}
+            for i in range(200)
+        ]
+        add_alert("New Alert", "msg", "info")
+        assert len(_monitoring_data["alerts"]) <= 200
+
+    def test_add_alert_all_levels(self):
+        for level in ("info", "warning", "error"):
+            alert = add_alert(f"Test {level}", "msg", level)
+            assert alert["level"] == level
+
+
 # ── Routes ────────────────────────────────────────────────────────
 
 
@@ -322,23 +441,26 @@ class TestMonitoringRoutes:
             init_monitoring(app)
 
         client = app.test_client()
+        resp = await client.get("/monitoring/login")
+        csrf_token = ""
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+        
+        client.client.cookies.set("monitoring_csrf", csrf_token)
         resp = await client.post(
             "/monitoring/login",
-            content=b"username=admin&password=wrong"
+            content=f"username=admin&password=wrong&csrf_token={csrf_token}".encode(),
         )
         assert resp.status_code == 401
 
     async def test_monitoring_api_health(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/health")
         assert resp.status_code == 200
         data = resp.json()
@@ -346,15 +468,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_traffic(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/traffic")
         assert resp.status_code == 200
         data = resp.json()
@@ -363,15 +481,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_alerts(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/alerts")
         assert resp.status_code == 200
         data = resp.json()
@@ -379,15 +493,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_stats(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/stats")
         assert resp.status_code == 200
         data = resp.json()
@@ -411,15 +521,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_alerts_invalid_limit(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/alerts?limit=invalid")
         assert resp.status_code == 200
         data = resp.json()
@@ -427,33 +533,25 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_alerts_limit_clamped(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/alerts?limit=9999")
         assert resp.status_code == 200
 
     async def test_monitoring_api_check_missing_url(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.post(
             "/monitoring/api/check",
             content=b"{}",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
 
@@ -468,9 +566,16 @@ class TestMonitoringRoutes:
             init_monitoring(app)
 
         client = app.test_client()
+        resp = await client.get("/monitoring/login")
+        csrf_token = ""
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+        
+        client.client.cookies.set("monitoring_csrf", csrf_token)
         resp = await client.post(
             "/monitoring/login",
-            content=b"username=&password="
+            content=f"username=&password=&csrf_token={csrf_token}".encode(),
         )
         assert resp.status_code == 401
 
@@ -491,15 +596,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_uptime(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/uptime")
         assert resp.status_code == 200
         data = resp.json()
@@ -507,15 +608,11 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_response_times(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/response-times?url=http://example.com")
         assert resp.status_code == 200
         data = resp.json()
@@ -523,29 +620,21 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_response_times_clamp(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/response-times?url=http://example.com&hours=999")
         assert resp.status_code == 200
 
     async def test_monitoring_api_hourly(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/hourly")
         assert resp.status_code == 200
         data = resp.json()
@@ -553,32 +642,133 @@ class TestMonitoringRoutes:
 
     async def test_monitoring_api_hourly_clamp(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/hourly?hours=999")
         assert resp.status_code == 200
 
     async def test_monitoring_api_summary(self, app):
         from fenrir.monitoring.core import init_monitoring
-        with patch.dict(os.environ, {
-            "MONITORING_ENABLED": "true",
-            "MONITORING_USER": "admin",
-            "MONITORING_PASSWORD": "testpass",
-            "MONITORING_SECRET_KEY": "test-secret",
-        }):
+        with patch.dict(os.environ, MONITORING_ENV):
             init_monitoring(app)
 
         client = app.test_client()
+        await _login(client)
         resp = await client.get("/monitoring/api/summary")
         assert resp.status_code == 200
         data = resp.json()
         assert "overview" in data
         assert "sites" in data
         assert "hourly_traffic" in data
+
+    async def test_monitoring_login_success_sets_cookie(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        resp = await client.get("/monitoring/login")
+        csrf_token = ""
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+
+        client.client.cookies.set("monitoring_csrf", csrf_token)
+        resp = await client.post(
+            "/monitoring/login",
+            content=f"username=admin&password=testpass&csrf_token={csrf_token}".encode(),
+        )
+        assert resp.status_code == 302
+        assert "/monitoring/dashboard" in resp.headers.get("location", "")
+
+    async def test_monitoring_login_csrf_mismatch(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        resp = await client.get("/monitoring/login")
+        csrf_token = ""
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+
+        client.client.cookies.set("monitoring_csrf", csrf_token)
+        resp = await client.post(
+            "/monitoring/login",
+            content=f"username=admin&password=testpass&csrf_token=wrong_token".encode(),
+        )
+        assert resp.status_code == 403
+
+    async def test_monitoring_dashboard_renders_with_auth(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        await _login(client)
+        resp = await client.get("/monitoring/dashboard")
+        assert resp.status_code == 200
+        assert "Fenrir" in resp.text
+
+    async def test_monitoring_api_check_valid_url(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        await _login(client)
+        resp = await client.post(
+            "/monitoring/api/check",
+            content=json.dumps({"url": "http://localhost:8000"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["url"] == "http://localhost:8000"
+
+    async def test_monitoring_api_check_url_not_in_sites(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        await _login(client)
+        resp = await client.post(
+            "/monitoring/api/check",
+            content=json.dumps({"url": "http://evil.com"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 403
+
+    async def test_monitoring_login_page_sets_csrf_cookie(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        resp = await client.get("/monitoring/login")
+        assert resp.status_code == 200
+        csrf_cookie_found = False
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_cookie_found = True
+                assert "SameSite=Lax" in cookie
+                assert "Max-Age=300" in cookie
+        assert csrf_cookie_found
+
+    async def test_monitoring_api_check_unauthenticated(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        resp = await client.post(
+            "/monitoring/api/check",
+            content=json.dumps({"url": "http://localhost:8000"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401

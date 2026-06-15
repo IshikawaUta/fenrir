@@ -363,7 +363,7 @@ def cmd_new(args):
 import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="3.1.1")
+app = Fenrir(title="My Fenrir Application", version="3.1.2")
 
 @app.get("/")
 async def home():
@@ -670,7 +670,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v3.1.1</span>
+                <span class="info-value">Fenrir v3.1.2</span>
             </div>
         </div>
 
@@ -755,7 +755,7 @@ def cmd_monitoring(args):
     elif args.monitoring_action == "status":
         try:
             from dotenv import load_dotenv
-            load_dotenv()
+            load_dotenv(os.path.join(os.getcwd(), ".env"))
         except ImportError:
             pass
         

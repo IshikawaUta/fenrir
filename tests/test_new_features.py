@@ -389,3 +389,141 @@ def test_apirouter_metadata_forwarded():
     r = router.routes[0]
     assert r.tags == ["x"]
     assert r.summary == "My ep"
+
+
+# ── OpenAPI XSS Prevention ──────────────────────────────────────
+
+
+def test_swagger_html_escapes_xss_in_url():
+    from fenrir.openapi import get_swagger_html
+    html = get_swagger_html(openapi_url="http://x.com/'+alert(1)+'")
+    # The single quotes should be escaped, preventing JS breakout
+    assert "'+alert(1)+'" not in html
+    # html.escape converts ' to &#x27; or similar
+    assert "alert" not in html or "&" in html
+
+
+def test_redoc_html_escapes_xss_in_url():
+    from fenrir.openapi import get_redoc_html
+    html = get_redoc_html(openapi_url='http://x.com/" onmouseover="alert(1)')
+    # The double quotes should be escaped, preventing attribute breakout
+    assert 'onmouseover="alert(1)"' not in html
+
+
+def test_swagger_html_escapes_xss_in_title():
+    from fenrir.openapi import get_swagger_html
+    html = get_swagger_html(title="<img onerror=alert(1)>")
+    # HTML tags should be escaped
+    assert "<img" not in html
+    assert "&lt;" in html
+
+
+def test_swagger_html_normal_url_passthrough():
+    from fenrir.openapi import get_swagger_html
+    html = get_swagger_html(openapi_url="/openapi.json")
+    assert "url: '/openapi.json'" in html
+
+
+# ── Content-Disposition Sanitization ─────────────────────────────
+
+
+def test_file_response_sanitizes_quote_in_filename(tmp_path):
+    f = tmp_path / 'file"name.txt'
+    f.write_text("content")
+    resp = FileResponse(str(f), filename='file"name.txt')
+    assert 'file"name.txt' not in resp.headers.get("content-disposition", "")
+    assert 'filename="filename.txt"' in resp.headers.get("content-disposition", "")
+
+
+def test_file_response_sanitizes_crlf_in_filename(tmp_path):
+    f = tmp_path / "normal.txt"
+    f.write_text("content")
+    resp = FileResponse(str(f), filename="a\r\nb.txt")
+    assert "\r" not in resp.headers.get("content-disposition", "")
+    assert "\n" not in resp.headers.get("content-disposition", "")
+
+
+def test_send_file_attachment_sanitizes_filename(tmp_path):
+    from fenrir.helpers import send_file
+    f = tmp_path / "normal.txt"
+    f.write_text("content")
+    resp = send_file(str(f), as_attachment=True, download_name='file"name.txt')
+    assert 'file"name.txt' not in resp.headers.get("content-disposition", "")
+
+
+# ── JSONResponse Outside Request Context ─────────────────────────
+
+
+def test_json_response_outside_request_context():
+    from fenrir.response import JSONResponse
+    resp = JSONResponse({"key": "value", "number": 42})
+    assert resp.status == 200
+    body = resp.body if isinstance(resp.body, str) else resp.body.decode()
+    assert '"key": "value"' in body
+    assert '"number": 42' in body
+
+
+# ── Session Modified Flag ────────────────────────────────────────
+
+
+def test_session_pop_existing_key_sets_modified():
+    from fenrir.sessions import SessionMixin
+    s = SessionMixin({"a": 1})
+    s.modified = False
+    s.pop("a")
+    assert s.modified is True
+
+
+def test_session_pop_missing_key_no_modified():
+    from fenrir.sessions import SessionMixin
+    s = SessionMixin({"a": 1})
+    s.modified = False
+    s.pop("b")
+    assert s.modified is False
+
+
+def test_session_mixin_all_modified_flags():
+    from fenrir.sessions import SessionMixin
+    s = SessionMixin()
+
+    s.modified = False
+    s["x"] = 1
+    assert s.modified is True
+
+    s.modified = False
+    del s["x"]
+    assert s.modified is True
+
+    s.modified = False
+    s.clear()
+    assert s.modified is True
+
+    s.modified = False
+    s.update({"y": 2})
+    assert s.modified is True
+
+
+# ── send_file Edge Cases ─────────────────────────────────────────
+
+
+def test_send_file_as_attachment_returns_file_response(tmp_path):
+    from fenrir.helpers import send_file
+    f = tmp_path / "test.txt"
+    f.write_text("hello")
+    resp = send_file(str(f), as_attachment=True)
+    assert isinstance(resp, FileResponse)
+
+
+def test_send_file_filelike_object():
+    from fenrir.helpers import send_file
+    import io
+    data = io.BytesIO(b"hello world")
+    resp = send_file(data)
+    assert resp.status == 200
+
+
+def test_send_file_missing_raises_404():
+    from fenrir.helpers import send_file
+    from fenrir.exceptions import HTTPNotFound
+    with pytest.raises(HTTPNotFound):
+        send_file("/nonexistent/path/file.txt")

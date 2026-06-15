@@ -249,18 +249,21 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
 
 
 def get_swagger_html(openapi_url: str = "/openapi.json", title: str = "Fenrir Swagger UI") -> str:
+    import html as _html
+    safe_url = _html.escape(openapi_url, quote=True)
+    safe_title = _html.escape(title)
     return f"""<!DOCTYPE html>
 <html>
 <head>
     <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
-    <title>{title}</title>
+    <title>{safe_title}</title>
 </head>
 <body>
     <div id="swagger-ui"></div>
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
         const ui = SwaggerUIBundle({{
-            url: '{openapi_url}',
+            url: '{safe_url}',
             dom_id: '#swagger-ui',
             presets: [
                 SwaggerUIBundle.presets.apis,
@@ -275,10 +278,13 @@ def get_swagger_html(openapi_url: str = "/openapi.json", title: str = "Fenrir Sw
 
 
 def get_redoc_html(openapi_url: str = "/openapi.json", title: str = "Fenrir ReDoc") -> str:
+    import html as _html
+    safe_url = _html.escape(openapi_url, quote=True)
+    safe_title = _html.escape(title)
     return f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>{title}</title>
+    <title>{safe_title}</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
@@ -290,7 +296,7 @@ def get_redoc_html(openapi_url: str = "/openapi.json", title: str = "Fenrir ReDo
     </style>
 </head>
 <body>
-    <redoc spec-url="{openapi_url}"></redoc>
+    <redoc spec-url="{safe_url}"></redoc>
     <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"> </script>
 </body>
 </html>

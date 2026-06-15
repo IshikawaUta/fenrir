@@ -19,7 +19,7 @@ def init_fenrir_monitoring(app: Any, **kwargs):
     """
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(os.path.join(os.getcwd(), ".env"))
     except ImportError:
         pass
     

@@ -1,5 +1,7 @@
 """Monitoring routes - login, dashboard, health checks, traffic analysis."""
 import os
+import html
+import hmac
 from datetime import datetime
 from typing import Any
 
@@ -25,45 +27,97 @@ def register_monitoring_routes(app: Any):
     """Register all monitoring routes on the app."""
     prefix = "/monitoring"
 
+    def _check_token(token: str) -> bool:
+        """Validate the monitoring token."""
+        if not token:
+            return False
+        from fenrir.monitoring.core import _validate_token
+        secret_key = app.config.get("MONITORING_SECRET_KEY", "")
+        user = app.config.get("MONITORING_USER", "admin")
+        return _validate_token(token, user, secret_key)
+
     @app.get(prefix)
     async def monitoring_index():
         from fenrir.context import request
         token = request.cookies.get("monitoring_token")
-        if not token:
+        if not _check_token(token):
             return redirect(f"{prefix}/login")
         return redirect(f"{prefix}/dashboard")
 
     @app.get(f"{prefix}/login")
     async def monitoring_login_page():
-        return HTMLResponse(_render_login_page())
+        import secrets
+        csrf_token = secrets.token_hex(32)
+        from fenrir.response import Response
+        resp = Response(
+            body=_render_login_page(csrf_token=csrf_token),
+            status=200,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Set-Cookie": f"monitoring_csrf={csrf_token}; Path=/; SameSite=Lax; Max-Age=300",
+            },
+        )
+        return resp
 
     @app.post(f"{prefix}/login")
     async def monitoring_login():
         from fenrir.context import request
         
         body = request.body
-        form_data = _parse_form(body.decode("utf-8"))
+        try:
+            body_str = body.decode("utf-8", errors="replace") if body else ""
+        except Exception:
+            body_str = ""
+        form_data = _parse_form(body_str)
         
         username = form_data.get("username", "")
         password = form_data.get("password", "")
+        csrf_form = form_data.get("csrf_token", "")
+        
+        csrf_cookie = request.cookies.get("monitoring_csrf", "")
+        if not csrf_form or not csrf_cookie or not hmac.compare_digest(csrf_form, csrf_cookie):
+            import secrets
+            new_csrf = secrets.token_hex(32)
+            from fenrir.response import Response
+            resp = Response(
+                body=_render_login_page(error="Invalid request. Please try again.", csrf_token=new_csrf),
+                status=403,
+                headers={
+                    "Content-Type": "text/html; charset=utf-8",
+                    "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=300",
+                },
+            )
+            return resp
         
         config_user = app.config.get("MONITORING_USER", "admin")
         config_hash = app.config.get("MONITORING_PASSWORD_HASH", "")
         
         if username == config_user and _verify_password(password, config_hash):
             token = _generate_token(username, app.config.get("MONITORING_SECRET_KEY", ""))
+            secure_flag = "; Secure" if os.getenv("MONITORING_SECURE_COOKIES", "").lower() == "true" else ""
             from fenrir.response import Response
             resp = Response(
                 body="",
                 status=302,
                 headers={
                     "Location": f"{prefix}/dashboard",
-                    "Set-Cookie": f"monitoring_token={token}; Path={prefix}; HttpOnly; SameSite=Lax",
+                    "Set-Cookie": f"monitoring_token={token}; Path={prefix}; HttpOnly; SameSite=Lax{secure_flag}",
                 },
             )
             return resp
         
-        return HTMLResponse(_render_login_page(error="Invalid credentials"), status=401)
+        import secrets
+        new_csrf = secrets.token_hex(32)
+        from fenrir.response import Response
+        resp = Response(
+            body=_render_login_page(error="Invalid credentials", csrf_token=new_csrf),
+            status=401,
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=300",
+            },
+        )
+        return resp
 
     @app.get(f"{prefix}/logout")
     async def monitoring_logout():
@@ -82,7 +136,7 @@ def register_monitoring_routes(app: Any):
     async def monitoring_dashboard():
         from fenrir.context import request
         token = request.cookies.get("monitoring_token")
-        if not token:
+        if not _check_token(token):
             return redirect(f"{prefix}/login")
         
         traffic = get_traffic_stats()
@@ -107,22 +161,31 @@ def register_monitoring_routes(app: Any):
 
     @app.get(f"{prefix}/api/health")
     async def monitoring_api_health():
+        import asyncio
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         sites = _monitoring_data.get("sites", [])
-        results = []
-        for site in sites:
-            result = await check_site_health_async(site)
-            results.append(result)
+        results = await asyncio.gather(*[check_site_health_async(site) for site in sites])
         _save_data()
-        return JSONResponse({"sites": results})
+        return JSONResponse({"sites": list(results)})
 
     @app.get(f"{prefix}/api/traffic")
     async def monitoring_api_traffic():
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         stats = get_traffic_stats()
         return JSONResponse(stats)
 
     @app.get(f"{prefix}/api/alerts")
     async def monitoring_api_alerts():
         from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         try:
             limit = int(request.args.get("limit", "50"))
             limit = max(1, min(limit, 500))
@@ -134,12 +197,23 @@ def register_monitoring_routes(app: Any):
     @app.post(f"{prefix}/api/check")
     async def monitoring_api_check():
         from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         body = request.body
-        data = _parse_json(body.decode("utf-8")) if body else {}
+        try:
+            body_str = body.decode("utf-8", errors="replace") if body else ""
+        except Exception:
+            body_str = ""
+        data = _parse_json(body_str)
         url = data.get("url")
         
         if not url:
             return JSONResponse({"error": "url is required"}, status=400)
+        
+        allowed_sites = _monitoring_data.get("sites", [])
+        if url not in allowed_sites:
+            return JSONResponse({"error": "url not in monitored sites"}, status=403)
         
         result = await check_site_health_async(url)
         _save_data()
@@ -147,6 +221,10 @@ def register_monitoring_routes(app: Any):
 
     @app.get(f"{prefix}/api/stats")
     async def monitoring_api_stats():
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         traffic = get_traffic_stats()
         sites_count = len(_monitoring_data.get("sites", []))
         healthy = sum(
@@ -163,38 +241,64 @@ def register_monitoring_routes(app: Any):
 
     @app.get(f"{prefix}/api/uptime")
     async def monitoring_api_uptime():
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         uptime = get_uptime_stats()
         return JSONResponse(uptime)
 
     @app.get(f"{prefix}/api/response-times")
     async def monitoring_api_response_times():
         from fenrir.context import request
-        hours = int(request.args.get("hours", "24"))
-        hours = max(1, min(hours, 168))
-        history = get_response_time_history(hours)
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
+        try:
+            hours = int(request.args.get("hours", "24"))
+            hours = max(1, min(hours, 168))
+        except (ValueError, TypeError):
+            hours = 24
+        url = request.args.get("url", "")
+        if not url:
+            all_history = []
+            for site_url in _monitoring_data.get("sites", []):
+                all_history.extend(get_response_time_history(site_url, hours))
+            return JSONResponse({"history": all_history})
+        history = get_response_time_history(url, hours)
         return JSONResponse({"history": history})
 
     @app.get(f"{prefix}/api/hourly")
     async def monitoring_api_hourly():
         from fenrir.context import request
-        days = int(request.args.get("days", "7"))
-        days = max(1, min(days, 30))
-        hourly = get_hourly_traffic(days)
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
+        try:
+            days = int(request.args.get("days", "7"))
+            days = max(1, min(days, 30))
+        except (ValueError, TypeError):
+            days = 7
+        hourly = get_hourly_traffic(days * 24)
         return JSONResponse({"hourly": hourly})
 
     @app.get(f"{prefix}/api/summary")
     async def monitoring_api_summary():
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return JSONResponse({"error": "unauthorized"}, status=401)
         summary = get_summary()
         return JSONResponse(summary)
 
 
 def _parse_form(body: str) -> dict:
     """Parse URL-encoded form data."""
+    from urllib.parse import unquote_plus
     result = {}
     for pair in body.split("&"):
         if "=" in pair:
             key, value = pair.split("=", 1)
-            from urllib.parse import unquote_plus
             result[unquote_plus(key)] = unquote_plus(value)
     return result
 
@@ -208,11 +312,11 @@ def _parse_json(body: str) -> dict:
         return {}
 
 
-def _render_login_page(error: str = None) -> str:
+def _render_login_page(error: str = None, csrf_token: str = "") -> str:
     """Render the monitoring login page."""
     error_html = ""
     if error:
-        error_html = f'<div class="error">{error}</div>'
+        error_html = f'<div class="error">{html.escape(error)}</div>'
     
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -347,6 +451,7 @@ def _render_login_page(error: str = None) -> str:
         </div>
         {error_html}
         <form method="POST" action="/monitoring/login">
+            <input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autocomplete="username" autofocus>
@@ -386,16 +491,16 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
         status = site.get("status", "unknown")
         status_class = {"healthy": "ok", "degraded": "warn", "down": "error"}.get(status, "unknown")
         rt = site.get("response_time")
-        rt_display = f"{rt}ms" if rt else "N/A"
+        rt_display = f"{rt}ms" if rt is not None else "N/A"
         code = site.get("status_code") or "-"
         
         health_cards += f"""
         <div class="health-card {status_class}">
             <div class="health-status">
                 <span class="status-dot {status_class}"></span>
-                <span class="status-text">{status.upper()}</span>
+                <span class="status-text">{html.escape(status.upper())}</span>
             </div>
-            <div class="health-url">{site['url']}</div>
+            <div class="health-url">{html.escape(site['url'])}</div>
             <div class="health-meta">
                 <span>HTTP {code}</span>
                 <span>{rt_display}</span>
@@ -416,8 +521,8 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
         alerts_html += f"""
         <div class="alert-item {level_class}">
             <span class="alert-time">{ts_display}</span>
-            <span class="alert-title">{alert.get('title', '')}</span>
-            <span class="alert-msg">{alert.get('message', '')}</span>
+            <span class="alert-title">{html.escape(alert.get('title', ''))}</span>
+            <span class="alert-msg">{html.escape(alert.get('message', ''))}</span>
         </div>"""
     
     if not alerts_html:
@@ -428,7 +533,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
         bar_width = min(count * 100 / max(today.get("total", 1), 1), 100)
         status_codes_html += f"""
         <div class="bar-row">
-            <span class="bar-label">{code}</span>
+            <span class="bar-label">{html.escape(str(code))}</span>
             <div class="bar-track"><div class="bar-fill" style="width:{bar_width}%"></div></div>
             <span class="bar-value">{count}</span>
         </div>"""
@@ -437,13 +542,13 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
     for path, count in list(today.get("paths", {}).items())[:5]:
         top_paths_html += f"""
         <div class="path-row">
-            <span class="path-name">{path}</span>
+            <span class="path-name">{html.escape(path)}</span>
             <span class="path-count">{count}</span>
         </div>"""
     
     methods_html = ""
     for method, count in today.get("methods", {}).items():
-        methods_html += f'<span class="method-badge">{method} {count}</span>'
+        methods_html += f'<span class="method-badge">{html.escape(method)} {count}</span>'
     
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -730,7 +835,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             <div class="stat-card">
                 <div class="stat-label">Uptime</div>
                 <div class="stat-value" style="color:{uptime_color}">{uptime_pct}%</div>
-                <div class="stat-change positive">Since {_monitoring_data.get('start_time', 'N/A')[:10]}</div>
+                <div class="stat-change positive">Since {str(_monitoring_data.get('start_time') or 'N/A')[:10]}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">Error Rate</div>
@@ -783,6 +888,11 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
     </div>
 
     <script>
+        function escapeHtml(str) {{
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }}
+
         async function refreshHealth() {{
             const grid = document.getElementById('health-grid');
             grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-secondary);padding:20px;">Checking sites...</div>';
@@ -798,12 +908,12 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
                         <div class="health-card ${{statusClass}}">
                             <div class="health-status">
                                 <span class="status-dot ${{statusClass}}"></span>
-                                <span class="status-text">${{site.status.toUpperCase()}}</span>
+                                <span class="status-text">${{escapeHtml(site.status.toUpperCase())}}</span>
                             </div>
-                            <div class="health-url">${{site.url}}</div>
+                            <div class="health-url">${{escapeHtml(site.url)}}</div>
                             <div class="health-meta">
-                                <span>HTTP ${{code}}</span>
-                                <span>${{rt}}</span>
+                                <span>HTTP ${{escapeHtml(code)}}</span>
+                                <span>${{escapeHtml(rt)}}</span>
                             </div>
                         </div>`;
                 }}

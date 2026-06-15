@@ -2,6 +2,7 @@
 import os
 import json
 import time
+import hmac
 import hashlib
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -21,13 +22,31 @@ _monitoring_data: Dict[str, Any] = {
     "error_count": 0,
 }
 
-_DEFAULT_SECRET = "fenrir-monitoring-change-me"
+_DEFAULT_SECRET = None
+
+
+def _get_default_secret() -> str:
+    """Generate a random secret key if none is configured."""
+    global _DEFAULT_SECRET
+    if _DEFAULT_SECRET is None:
+        import secrets
+        _DEFAULT_SECRET = secrets.token_hex(32)
+        import logging
+        logging.warning(
+            "MONITORING_SECRET_KEY not set. Using random key (sessions will not survive restart). "
+            "Set MONITORING_SECRET_KEY in your .env file for persistent sessions."
+        )
+    return _DEFAULT_SECRET
 
 
 def _get_data_dir() -> Path:
     """Get the data directory for persistent storage."""
     data_dir = Path(os.getcwd()) / ".fenrir_monitoring"
-    data_dir.mkdir(exist_ok=True)
+    try:
+        data_dir.mkdir(exist_ok=True)
+    except OSError as e:
+        import logging
+        logging.warning(f"Cannot create monitoring data directory {data_dir}: {e}")
     return data_dir
 
 
@@ -35,7 +54,7 @@ def _load_config() -> Dict[str, Any]:
     """Load monitoring configuration from environment variables."""
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(os.path.join(os.getcwd(), ".env"))
     except ImportError:
         pass
 
@@ -43,7 +62,7 @@ def _load_config() -> Dict[str, Any]:
         "enabled": os.getenv("MONITORING_ENABLED", "false").lower() == "true",
         "user": os.getenv("MONITORING_USER", "admin"),
         "password_hash": None,
-        "secret_key": os.getenv("MONITORING_SECRET_KEY", _DEFAULT_SECRET),
+        "secret_key": os.getenv("MONITORING_SECRET_KEY") or _get_default_secret(),
         "sites": [
             s.strip()
             for s in os.getenv("MONITORING_SITES", "http://localhost:8000").split(",")
@@ -65,10 +84,28 @@ def _verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-def _generate_token(user: str, secret_key: str) -> str:
-    """Generate a simple session token."""
-    payload = f"{user}:{int(time.time())}"
-    return hashlib.sha256(f"{payload}:{secret_key}".encode()).hexdigest()
+def _generate_token(user: str, secret_key: str, expires_in: int = 86400) -> str:
+    """Generate a session token with expiration (default 24 hours)."""
+    expires_at = int(time.time()) + expires_in
+    payload = f"{user}:{expires_at}:{secret_key}"
+    token_hash = hashlib.sha256(payload.encode()).hexdigest()
+    return f"{token_hash}:{expires_at}"
+
+
+def _validate_token(token: str, user: str, secret_key: str) -> bool:
+    """Validate a session token, checking expiration."""
+    if not token or ":" not in token:
+        return False
+    try:
+        token_hash, expires_at_str = token.rsplit(":", 1)
+        expires_at = int(expires_at_str)
+    except (ValueError, AttributeError):
+        return False
+    if int(time.time()) > expires_at:
+        return False
+    expected_payload = f"{user}:{expires_at}:{secret_key}"
+    expected_hash = hashlib.sha256(expected_payload.encode()).hexdigest()
+    return hmac.compare_digest(token_hash, expected_hash)
 
 
 def _save_data():
@@ -87,8 +124,11 @@ def _save_data():
         "error_count": _monitoring_data.get("error_count", 0),
     }
     
-    with open(data_file, "w") as f:
-        json.dump(serializable, f, indent=2, default=str)
+    try:
+        with open(data_file, "w") as f:
+            json.dump(serializable, f, indent=2, default=str)
+    except Exception:
+        pass
 
 
 def _load_data():
@@ -102,7 +142,6 @@ def _load_data():
                 data = json.load(f)
             _monitoring_data["traffic_log"] = data.get("traffic_log", [])
             _monitoring_data["alerts"] = data.get("alerts", [])
-            _monitoring_data["sites"] = data.get("sites", [])
             _monitoring_data["health_history"] = data.get("health_history", {})
             _monitoring_data["request_count"] = data.get("request_count", 0)
             _monitoring_data["error_count"] = data.get("error_count", 0)
@@ -114,17 +153,38 @@ def init_monitoring(app: Any, config: Optional[Dict[str, Any]] = None):
     """Initialize the monitoring system and register routes on the app."""
     from fenrir.monitoring.routes import register_monitoring_routes
     
+    env_config = _load_config()
+    
     if config is None:
-        config = _load_config()
+        config = env_config
+    else:
+        for key in ("user", "secret_key", "sites", "check_interval"):
+            if key not in config or config[key] is None:
+                config[key] = env_config[key]
+            elif key == "sites" and not config[key]:
+                config[key] = env_config[key]
     
     enabled = config.get("enabled", False)
     app.config["MONITORING_ENABLED"] = enabled
     app.config["MONITORING_USER"] = config.get("user", "admin")
-    app.config["MONITORING_SECRET_KEY"] = config.get("secret_key", _DEFAULT_SECRET)
+    app.config["MONITORING_SECRET_KEY"] = config.get("secret_key") or _get_default_secret()
     app.config["MONITORING_SITES"] = config.get("sites", [])
     app.config["MONITORING_CHECK_INTERVAL"] = config.get("check_interval", 60)
     
     password = os.getenv("MONITORING_PASSWORD", "changeme")
+    allow_default = os.getenv("MONITORING_ALLOW_DEFAULT_PASSWORD", "").lower() == "true"
+    if password == "changeme" and enabled and not allow_default:
+        raise ValueError(
+            "MONITORING_PASSWORD must be set when MONITORING_ENABLED=true. "
+            "Set MONITORING_PASSWORD in your .env file, or set "
+            "MONITORING_ALLOW_DEFAULT_PASSWORD=true to override (not recommended for production)."
+        )
+    if password == "changeme":
+        import logging
+        logging.warning(
+            "MONITORING_PASSWORD not set. Using default 'changeme'. "
+            "Set MONITORING_PASSWORD in your .env file for production."
+        )
     app.config["MONITORING_PASSWORD_HASH"] = _hash_password(password)
     
     if not enabled:

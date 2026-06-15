@@ -114,9 +114,16 @@ def send_file(
             mimetype, _ = mimetypes.guess_type(filepath)
             if mimetype is None:
                 mimetype = "application/octet-stream"
+        name = download_name or os.path.basename(filepath)
+        if as_attachment:
+            from fenrir.response import FileResponse
+            return FileResponse(
+                filepath,
+                media_type=mimetype,
+                filename=name,
+            )
         with open(filepath, "rb") as f:
             data = f.read()
-        name = download_name or os.path.basename(filepath)
     else:
         # File-like object
         data = path_or_file.read()
@@ -126,7 +133,8 @@ def send_file(
 
     headers = {}
     if as_attachment:
-        headers["content-disposition"] = f'attachment; filename="{name}"'
+        safe_name = name.replace('"', '').replace('\r', '').replace('\n', '')
+        headers["content-disposition"] = f'attachment; filename="{safe_name}"'
     return Response(body=data, content_type=mimetype, headers=headers)
 
 

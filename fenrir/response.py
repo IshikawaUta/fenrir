@@ -167,7 +167,8 @@ class JSONResponse(Response):
         if app is not None and hasattr(app, "json"):
             body = app.json.dumps(content)
         else:
-            body = json.dumps(content)
+            from fenrir.json import DefaultJSONProvider
+            body = DefaultJSONProvider(None).dumps(content)
             
         super().__init__(
             body=body,
@@ -316,9 +317,10 @@ class FileResponse(Response):
         if filename is None:
             filename = os.path.basename(path)
         if filename:
+            safe_filename = filename.replace('"', '').replace('\r', '').replace('\n', '')
             self.headers.setdefault(
                 "content-disposition",
-                f'{content_disposition_type}; filename="{filename}"'
+                f'{content_disposition_type}; filename="{safe_filename}"'
             )
 
         # Content-Length
