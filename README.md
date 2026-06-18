@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-706%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-748%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -95,7 +95,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.2")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.3")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -222,7 +222,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v3.1.2 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v3.1.3 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -466,7 +466,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **706 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), and all v3.1.2 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **748 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, and all v3.1.3 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -476,12 +476,33 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-=============================== 706 passed, 1 skipped in 22.50s ===============================
+=============================== 748 passed, 1 skipped in 22.50s ===============================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v3.1.3 — Dev Mode Debug Page & Error Handling
+
+**New Features:**
+- Laravel-style dev mode debug page (`--dev` flag or `FENRIR_DEV_MODE=1` env var)
+- Debug page with sidebar, tabs (Stack Trace / Request / Raw Trace), and collapsible frames
+- ASGI middleware errors now caught and displayed on debug page
+- Dev mode overrides custom exception handlers for full debug info
+- Client info detection: scope → X-Forwarded-For → X-Real-IP → Host header
+- XSS protection via `html.escape()` on all user-controlled values
+- Responsive design for mobile (768px and 480px breakpoints)
+- Vendor frame toggle with frame count
+
+**Bug Fixes:**
+- Fixed `dev_mode=False` overriding env var (changed default to `None`)
+- Fixed `os.environ` leak between tests in CLI
+- Fixed `html.escape()` crash on non-string detail (pydantic validation)
+
+**Tests:**
+- Added 42 new tests covering dev mode, ASGI middleware errors, responsive CSS, XSS, and client info
+- Total test count: 748 (up from 706)
 
 ### v3.1.2 — Security & Bug Fix Release
 

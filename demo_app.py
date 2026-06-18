@@ -12,7 +12,14 @@ from fenrir import (
     render_template,
     Response,
     HTTPBadRequest,
+    HTTPUnauthorized,
+    HTTPForbidden,
+    HTTPNotFound,
+    HTTPConflict,
+    HTTPUnprocessableEntity,
+    HTTPInternalServerError,
 )
+from fenrir.response import JSONResponse
 from fenrir.features import init_fenrir_monitoring
 
 # Load environment variables from .env file
@@ -27,7 +34,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.2")
+# dev_mode bisa diaktifkan lewat:
+#   1. CLI:       fenrir run demo_app:app --dev
+#   2. Env var:   FENRIR_DEV_MODE=1 fenrir run demo_app:app
+#   3. Program:   Fenrir(dev_mode=True) di bawah ini
+app = Fenrir(
+    title="Fenrir Hybrid Framework Demo",
+    version="3.1.3",
+    dev_mode=os.getenv("FENRIR_DEV_MODE") == "1",
+)
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -168,6 +183,139 @@ async def handle_value_error(req, exc):
 @app.get("/trigger-error")
 async def trigger_error():
     raise ValueError("Something went wrong!")
+
+@app.get("/error/zero-division")
+async def zero_division_error():
+    result = 1 / 0
+    return JSONResponse({"result": result})
+
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  CONTOH SEMUA JENIS ERROR (untuk testing debug page)            ║
+# ║  Jalankan dengan: fenrir run demo_app:app --dev                 ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+async def dep_user_id(user_id: int = Query(default=None)):
+    if user_id is None:
+        raise HTTPBadRequest("user_id wajib diisi")
+    return user_id
+
+async def dep_auth_fail():
+    raise HTTPUnauthorized("Token tidak valid atau expired")
+
+
+# 1. HTTP 400 - Bad Request
+@app.get("/error/400")
+async def err_400():
+    raise HTTPBadRequest("Request tidak valid")
+
+
+# 2. HTTP 401 - Unauthorized
+@app.get("/error/401")
+async def err_401():
+    raise HTTPUnauthorized("Kamu harus login dulu")
+
+
+# 3. HTTP 403 - Forbidden
+@app.get("/error/403")
+async def err_403():
+    raise HTTPForbidden("Kamu tidak punya akses ke resource ini")
+
+
+# 4. HTTP 404 - Not Found
+@app.get("/error/404")
+async def err_404():
+    raise HTTPNotFound("Halaman tidak ditemukan")
+
+
+# 5. HTTP 409 - Conflict
+@app.get("/error/409")
+async def err_409():
+    raise HTTPConflict("Data sudah ada, tidak boleh duplikat")
+
+
+# 6. HTTP 422 - Unprocessable Entity
+@app.get("/error/422")
+async def err_422():
+    raise HTTPUnprocessableEntity("Format data benar tapi isinya salah")
+
+
+# 7. HTTP 500 - Internal Server Error
+@app.get("/error/500")
+async def err_500():
+    raise HTTPInternalServerError("Server error internal")
+
+
+# 8. ValueError (handled by custom handler -> JSONResponse)
+@app.get("/error/value")
+async def err_value():
+    raise ValueError("Ini ditangkap custom handler, bukan debug page")
+
+
+# 9. ZeroDivisionError (unhandled -> debug page)
+@app.get("/error/zero")
+async def err_zero():
+    x = 1 / 0
+    return {"result": x}
+
+
+# 10. RuntimeError tanpa detail
+@app.get("/error/runtime")
+async def err_runtime():
+    raise RuntimeError()
+
+
+# 11. Exception dari Depends
+@app.get("/error/dep")
+async def err_dep(uid: int = Depends(dep_user_id)):
+    return {"user_id": uid}
+
+
+# 12. Exception dari Depends (auth gagal)
+@app.get("/error/auth")
+async def err_auth(x=Depends(dep_auth_fail)):
+    return {"x": x}
+
+
+# 13. Pydantic validation error (422 otomatis)
+@app.post("/error/pydantic")
+async def err_pydantic(body: LoginBody):
+    return {"user": body.username}
+
+
+# 14. Custom exception tanpa handler
+class AppCustomError(Exception):
+    def __init__(self, msg="custom app error"):
+        self.msg = msg
+        super().__init__(msg)
+
+@app.exception(AppCustomError)
+async def handle_custom(req, exc):
+    return JSONResponse({"custom_error": exc.msg}, status=500)
+
+@app.get("/error/custom")
+async def err_custom():
+    raise AppCustomError("Ini error kustom aplikasi")
+
+
+# 15. ASGI middleware error
+class BrokenMiddleware:
+    def __init__(self, app):
+        self.app = app
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith("/error/mw"):
+            raise RuntimeError("ASGI middleware error!")
+        await self.app(scope, receive, send)
+
+app.add_middleware(BrokenMiddleware)
+
+@app.get("/error/mw")
+async def err_middleware():
+    return {"msg": "tidak akan sampai ke sini"}
 
 # --- 7. Bottle-style Built-in Server Runner (runs programmatically via Asteri) ---
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ class FenrirCoreMixin:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "3.1.2",
+        version: str = "3.1.3",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",
@@ -91,6 +91,7 @@ class FenrirCoreMixin:
         root_path: str = None,
         strict_content_type: bool = False,
         route_class: Optional[Type[Route]] = None,
+        dev_mode: bool = None,
     ):
         self.title = title
         self.version = version
@@ -169,6 +170,10 @@ class FenrirCoreMixin:
         self._route_blueprints: Dict[Route, Blueprint] = {}
         self.dependency_overrides = {}
         self.strict_content_type = strict_content_type
+        if dev_mode is not None:
+            self.dev_mode = dev_mode
+        else:
+            self.dev_mode = os.environ.get("FENRIR_DEV_MODE") == "1"
         self._openapi_schema_cache: Optional[Dict[str, Any]] = None
 
         # Built-in docs endpoints

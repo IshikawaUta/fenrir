@@ -1,6 +1,7 @@
 import pytest
 from unittest import mock
 import sys
+import os
 from fenrir.cli import main
 
 # Mock app target for testing
@@ -80,6 +81,36 @@ def test_cli_run(mock_load_app):
             with mock.patch("sys.argv", ["fenrir", "run", "mock_module:app", "-p", "8888", "--dev"]):
                 main()
                 mock_arbiter.start.assert_called_once()
+    os.environ.pop("FENRIR_DEV_MODE", None)
+
+
+def test_cli_run_dev_sets_env_var(mock_load_app):
+    """Test that --dev flag sets FENRIR_DEV_MODE env var."""
+    app = MockApp()
+    mock_arbiter = mock.MagicMock()
+    os.environ.pop("FENRIR_DEV_MODE", None)
+
+    with mock.patch("fenrir.cli.load_app", return_value=app):
+        with mock.patch("asteri.arbiter.Arbiter", return_value=mock_arbiter):
+            with mock.patch("sys.argv", ["fenrir", "run", "mock_module:app", "--dev"]):
+                main()
+                assert os.environ.get("FENRIR_DEV_MODE") == "1"
+                assert app.dev_mode is True
+    os.environ.pop("FENRIR_DEV_MODE", None)
+
+
+def test_cli_run_no_dev_no_env_var(mock_load_app):
+    """Test that running without --dev does not set FENRIR_DEV_MODE."""
+    app = MockApp()
+    mock_arbiter = mock.MagicMock()
+    os.environ.pop("FENRIR_DEV_MODE", None)
+
+    with mock.patch("fenrir.cli.load_app", return_value=app):
+        with mock.patch("asteri.arbiter.Arbiter", return_value=mock_arbiter):
+            with mock.patch("sys.argv", ["fenrir", "run", "mock_module:app"]):
+                main()
+                assert "FENRIR_DEV_MODE" not in os.environ
+    os.environ.pop("FENRIR_DEV_MODE", None)
 
 
 def test_cli_bench(mock_load_app):

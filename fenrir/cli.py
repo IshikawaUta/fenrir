@@ -151,6 +151,12 @@ def cmd_run(args):
     reload_mode = args.dev or args.reload
     app = load_app(args.target)
     
+    if args.dev:
+        os.environ["FENRIR_DEV_MODE"] = "1"
+        app.dev_mode = True
+        if hasattr(app, "config"):
+            app.config["DEBUG"] = True
+    
     # Print our beautiful blue banner
     print_banner(app.title)
     print(f"\033[94mStarting Fenrir App '{app.title}' v{app.version}...\033[0m")
@@ -363,7 +369,7 @@ def cmd_new(args):
 import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="3.1.2")
+app = Fenrir(title="My Fenrir Application", version="3.1.3")
 
 @app.get("/")
 async def home():
@@ -670,7 +676,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v3.1.2</span>
+                <span class="info-value">Fenrir v3.1.3</span>
             </div>
         </div>
 
