@@ -22,6 +22,8 @@ from fenrir.monitoring.core import (
     get_summary,
 )
 
+from fenrir.json import json_loads
+
 
 def register_monitoring_routes(app: Any):
     """Register all monitoring routes on the app."""
@@ -305,9 +307,8 @@ def _parse_form(body: str) -> dict:
 
 def _parse_json(body: str) -> dict:
     """Parse JSON body."""
-    import json
     try:
-        return json.loads(body)
+        return json_loads(body)
     except Exception:
         return {}
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional
 
+from fenrir.json import json_dumps, json_loads
+
 
 class WebSocketDisconnect(Exception):
     def __init__(self, code: int = 1000, reason: str = ""):
@@ -73,9 +75,8 @@ class WebSocket:
         return message["bytes"]
 
     async def receive_json(self) -> Any:
-        import json
         text = await self.receive_text()
-        return json.loads(text)
+        return json_loads(text)
 
     async def send_text(self, text: str):
         if self.client_state != "CONNECTED":
@@ -88,8 +89,7 @@ class WebSocket:
         await self._send({"type": "websocket.send", "bytes": data})
 
     async def send_json(self, data: Any):
-        import json
-        await self.send_text(json.dumps(data))
+        await self.send_text(json_dumps(data))
 
     async def close(self, code: int = 1000, reason: str = ""):
         if self.client_state == "DISCONNECTED":

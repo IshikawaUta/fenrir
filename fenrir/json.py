@@ -1,8 +1,25 @@
-import json
+"""
+fenrir.json — JSON serialization using orjson.
+
+Provides fast JSON serialization with orjson (fallback to stdlib json).
+"""
+from __future__ import annotations
+
 import base64
 import uuid
 from datetime import date, datetime
 from typing import Any, Callable, Dict, Type
+
+# Try to import orjson, fallback to stdlib json
+try:
+    import orjson as _orjson
+    _HAS_ORJSON = True
+except ImportError:
+    _orjson = None  # type: ignore
+    _HAS_ORJSON = False
+
+import json as _stdlib_json
+
 
 class JSONProvider:
     def __init__(self, app: Any):
@@ -17,9 +34,14 @@ class JSONProvider:
 
 class DefaultJSONProvider(JSONProvider):
     def dumps(self, obj: Any, **kwargs: Any) -> str:
-        # Default options
+        if _HAS_ORJSON:
+            # orjson doesn't accept ensure_ascii or default kwargs
+            # It handles most types natively, use default fallback for others
+            result = _orjson.dumps(obj)
+            return result.decode("utf-8") if isinstance(result, bytes) else result
+        
         kwargs.setdefault("ensure_ascii", False)
-        # Custom default serializer for datetime / UUID
+        
         def default(o: Any) -> Any:
             if isinstance(o, datetime):
                 return o.isoformat()
@@ -30,10 +52,13 @@ class DefaultJSONProvider(JSONProvider):
             raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
         
         kwargs.setdefault("default", default)
-        return json.dumps(obj, **kwargs)
+        return _stdlib_json.dumps(obj, **kwargs)
 
     def loads(self, s: str, **kwargs: Any) -> Any:
-        return json.loads(s, **kwargs)
+        if _HAS_ORJSON:
+            # orjson accepts both str and bytes
+            return _orjson.loads(s)
+        return _stdlib_json.loads(s, **kwargs)
 
 
 class JSONTag:
@@ -119,10 +144,14 @@ class TaggedJSONSerializer:
             if isinstance(o, dict):
                 return {k: tag(v) for k, v in o.items()}
             if isinstance(o, list):
-                return [tag(v) for o_item in o for v in (o_item,)]  # safe iteration
+                return [tag(v) for o_item in o for v in (o_item,)]
             return o
 
-        return json.dumps(tag(obj))
+        tagged = tag(obj)
+        if _HAS_ORJSON:
+            result = _orjson.dumps(tagged)
+            return result.decode("utf-8") if isinstance(result, bytes) else result
+        return _stdlib_json.dumps(tagged)
 
     def loads(self, s: str) -> Any:
         def untag(o: Any) -> Any:
@@ -136,4 +165,37 @@ class TaggedJSONSerializer:
                 return [untag(v) for v in o]
             return o
 
-        return untag(json.loads(s))
+        if _HAS_ORJSON:
+            data = _orjson.loads(s)
+        else:
+            data = _stdlib_json.loads(s)
+        return untag(data)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Centralized JSON helpers — use these instead of importing json directly
+# ═══════════════════════════════════════════════════════════════════════
+
+def json_dumps(obj: Any) -> str:
+    """Serialize to JSON string using orjson when available."""
+    if _HAS_ORJSON:
+        result = _orjson.dumps(obj)
+        return result.decode("utf-8") if isinstance(result, bytes) else result
+    return _stdlib_json.dumps(obj)
+
+
+def json_loads(s: Any) -> Any:
+    """Deserialize from JSON string/bytes using orjson when available."""
+    if _HAS_ORJSON:
+        return _orjson.loads(s)
+    if isinstance(s, bytes):
+        s = s.decode("utf-8")
+    return _stdlib_json.loads(s)
+
+
+def json_dumps_bytes(obj: Any) -> bytes:
+    """Serialize to JSON bytes using orjson when available."""
+    if _HAS_ORJSON:
+        result = _orjson.dumps(obj)
+        return result if isinstance(result, bytes) else result.encode("utf-8")
+    return _stdlib_json.dumps(obj).encode("utf-8")

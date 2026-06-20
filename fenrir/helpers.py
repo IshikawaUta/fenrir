@@ -115,15 +115,13 @@ def send_file(
             if mimetype is None:
                 mimetype = "application/octet-stream"
         name = download_name or os.path.basename(filepath)
-        if as_attachment:
-            from fenrir.response import FileResponse
-            return FileResponse(
-                filepath,
-                media_type=mimetype,
-                filename=name,
-            )
-        with open(filepath, "rb") as f:
-            data = f.read()
+        # Always use FileResponse for efficient streaming
+        from fenrir.response import FileResponse
+        return FileResponse(
+            filepath,
+            media_type=mimetype,
+            filename=name if as_attachment else None,
+        )
     else:
         # File-like object
         data = path_or_file.read()

@@ -7,12 +7,13 @@ that integrate seamlessly with Fenrir's ASGI pipeline.
 from __future__ import annotations
 
 import gzip
-import json
 import logging
 import time
 import uuid
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+from fenrir.json import json_dumps
 
 logger = logging.getLogger("fenrir.middleware")
 
@@ -527,7 +528,7 @@ class BodyLimitMiddleware:
                 break
 
         if has_content_length and content_length > self.max_content_length:
-            body = json.dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
+            body = json_dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
             await send({
                 "type": "http.response.start",
                 "status": self.status_code,
@@ -556,7 +557,7 @@ class BodyLimitMiddleware:
         # Wrap send to reject if body exceeded
         async def guarded_send(message):
             if exceeded and message["type"] == "http.response.start":
-                body = json.dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
+                body = json_dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
                 await send({
                     "type": "http.response.start",
                     "status": self.status_code,
@@ -651,7 +652,7 @@ class CSRFMiddleware:
                         cookie_token = part.split("=", 1)[1]
 
         if not header_token or not cookie_token or header_token != cookie_token:
-            body = json.dumps({"detail": "CSRF token missing or invalid."})
+            body = json_dumps({"detail": "CSRF token missing or invalid."})
             await send({
                 "type": "http.response.start",
                 "status": 403,

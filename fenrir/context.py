@@ -118,7 +118,8 @@ class RequestContext:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
         try:
-            self.app.do_teardown_request(exc_val)
+            if hasattr(self.app, 'do_teardown_request'):
+                self.app.do_teardown_request(exc_val)
         finally:
             _request_ctx_var.reset(self._token_req)
             _g_ctx_var.reset(self._token_g)

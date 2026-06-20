@@ -459,8 +459,11 @@ def test_json_response_outside_request_context():
     resp = JSONResponse({"key": "value", "number": 42})
     assert resp.status == 200
     body = resp.body if isinstance(resp.body, str) else resp.body.decode()
-    assert '"key": "value"' in body
-    assert '"number": 42' in body
+    # orjson produces compact JSON without spaces
+    assert '"key"' in body
+    assert '"value"' in body
+    assert '"number"' in body
+    assert '42' in body
 
 
 # ── Session Modified Flag ────────────────────────────────────────

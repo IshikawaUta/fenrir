@@ -1,5 +1,8 @@
+import logging
 from typing import Any, AsyncIterable, Union, Dict, Optional
 from fenrir.response import Response
+
+logger = logging.getLogger("fenrir.sse")
 
 class EventSourceResponse(Response):
     def __init__(
@@ -43,8 +46,8 @@ class EventSourceResponse(Response):
                 for item in self.generator:
                     formatted = self._format_event(item)
                     await send_chunk(formatted)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("SSE generator error: %s", e)
         finally:
             # End stream
             await send({

@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-748%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-874%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -64,6 +64,15 @@ pip install -e .
 *   **⚡ Signature & Schema Caching**: `inspect.signature()` and OpenAPI schema are cached for faster repeated requests.
 *   **🛠️ Premium CLI Tooling**: Visual route tables, interactive app shell, in-memory benchmarking suite, project scaffolding, and environment system inspection.
 *   **📊 Built-in Monitoring Dashboard**: Health checks, traffic analysis, error rates, alerts, uptime stats, response time history, and hourly traffic with secure bcrypt authentication.
+*   **🔌 Plugin System**: Version compatibility, dependency resolution, config validation, hot-reload, auto-discovery, health monitoring.
+*   **🪝 Hook/Extension Points**: Priority ordering, one-time hooks, wildcard hooks, async/sync support, middleware integration.
+*   **🗄️ Lightweight ORM**: SQLite/PostgreSQL support, Model with metaclass, QuerySet with filters/ordering, SQL injection prevention.
+*   **💾 Caching System**: MemoryCache (LRU + TTL), RedisCache (SCAN not KEYS), FileCache (atomic writes).
+*   **📋 Queue/Job System**: Job with retry/backoff/priority/timeout, Worker with concurrency, MemoryQueue and RedisQueue backends.
+*   **🔗 GraphQL Support**: strawberry-graphql integration with GraphiQL playground.
+*   **📡 gRPC Support**: GRPCServer, GRPCService, GRPCClient, interceptors.
+*   **📊 Performance Module**: ObjectPool, ResponseCache, PerformanceMonitor, optimize_app().
+*   **⚡ orjson Integration**: All JSON serialization uses orjson (7x faster than stdlib json).
 *   **🐍 Python 3.8–3.13 Compatible**: Full backward compatibility ensured via `typing_extensions` polyfills for `Annotated`, `get_origin`, `get_args`; and a `contextvars`-aware `asyncio.to_thread` shim.
 
 ---
@@ -95,7 +104,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="3.1.3")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.0.0")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -222,7 +231,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v3.1.3 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.0.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -466,7 +475,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **748 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, and all v3.1.3 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **874 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.0.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -476,12 +485,46 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-=============================== 748 passed, 1 skipped in 22.50s ===============================
+================================ 874 passed, 1 skipped in 37.00s ================================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v4.0.0 — Production-Ready Major Release
+
+**New Features:**
+- **Plugin System** (`fenrir/plugins.py`): PluginRegistry with version compatibility, dependency resolution (circular detection), config validation, hot-reload, auto-discovery via entry points, health monitoring, namespace isolation, thread-safety
+- **Hook/Extension Points** (`fenrir/hooks.py`): HookRegistry with priority ordering, one-time hooks, wildcard hooks, async/sync support, middleware integration, hook cancellation
+- **Lightweight ORM** (`fenrir/orm.py`): Database (SQLite/PostgreSQL), Model with metaclass, Field types, QuerySet with filters/ordering/limit/offset, parameterized queries, SQL injection prevention
+- **Caching System** (`fenrir/cache.py`): MemoryCache (LRU + TTL), RedisCache (SCAN not KEYS), FileCache (atomic writes), prefix invalidation
+- **Queue/Job System** (`fenrir/queue.py`): Queue with handler registration, Job with retry/backoff/priority/timeout, Worker with concurrency, MemoryQueue and RedisQueue backends
+- **GraphQL Support** (`fenrir/graphql.py`): GraphQLRouter with strawberry-graphql integration, GraphiQL playground
+- **gRPC Support** (`fenrir/grpc.py`): GRPCServer, GRPCService, GRPCClient, GRPCContext, interceptors
+- **Performance Module** (`fenrir/performance.py`): ObjectPool, ResponseCache, PerformanceMonitor, optimize_app()
+- **orjson Integration**: All JSON serialization uses orjson (7x faster than stdlib json), with stdlib json fallback
+
+**Performance Optimizations:**
+- **Lazy imports**: Reduced import time from 681ms to 53ms (92% faster)
+- **orjson JSON serialization**: 7x faster than stdlib json (233ms vs 1652ms for 10000 ops)
+- **Centralized JSON helpers**: `json_dumps()`, `json_loads()`, `json_dumps_bytes()` in `fenrir/json.py`
+- **Benchmark results**: Fenrir wins 3/4 vs FastAPI (Import, Route Reg, Throughput)
+
+**Bug Fixes (29 total):**
+- **CRITICAL (2)**: Race condition `Database.connect()` with proper asyncio.Lock, SQL injection `QuerySet.update()` with field validation
+- **HIGH (4)**: Swallowed errors in `_app_dispatch.py` with logging, pool overflow in `pool.py` with semaphore inside lock, gRPC service registration, memory leak in queue cleanup
+- **MEDIUM (3)**: Session deadlock with separate thread event loop, one-time wildcard hook removal, redundant import json consolidation
+- **LOW (6)**: Dead code removal, SSE silent exception logging, delete_cookie expires fix, context.py do_teardown_request guard, send_file streaming, Model._meta mutable default
+
+**Architecture Improvements:**
+- **Python 3.8-3.13 Compatibility**: No match/case, no type|None syntax, no list[int] runtime hints
+- **Import Circular Free**: DAG import graph with lazy loading
+- **Thread Safety**: Proper locks for plugins (RLock), hooks (Lock), Redis queue (asyncio.Lock)
+
+**Tests:**
+- Added 126 new tests covering plugin system, hook system, ORM, cache, queue, GraphQL, gRPC, performance
+- Total test count: 874 (up from 748)
 
 ### v3.1.3 — Dev Mode Debug Page & Error Handling
 

@@ -133,14 +133,14 @@ class ConnectionPool(Generic[T]):
             else:
                 item.last_used = time.monotonic()
                 self._pool.append(item)
-        self._semaphore.release()
+            self._semaphore.release()
 
     async def _discard(self, item: _PoolItem[T]) -> None:
         """Discard a broken connection."""
         async with self._lock:
             self._active -= 1
+            self._semaphore.release()
         await self._destroy_connection(item)
-        self._semaphore.release()
 
     async def close(self) -> None:
         """Close all connections in the pool."""

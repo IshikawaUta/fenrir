@@ -1,7 +1,8 @@
-import json
 import time
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from typing import Any, Dict, Optional
+
+from fenrir.json import json_dumps, json_loads
 
 
 class SessionMixin(dict):
@@ -138,19 +139,27 @@ class RedisSessionInterface(SessionInterface):
             except RuntimeError:
                 loop = None
             if loop and loop.is_running():
+                # Use run_coroutine_threadsafe to avoid blocking the event loop
                 import concurrent.futures
+                import threading
+                
                 future = concurrent.futures.Future()
-
-                async def _wrapper():
+                
+                def _run_in_thread():
                     try:
-                        result = await coro_or_value
-                        future.set_result(result)
+                        new_loop = asyncio.new_event_loop()
+                        try:
+                            result = new_loop.run_until_complete(coro_or_value)
+                            future.set_result(result)
+                        finally:
+                            new_loop.close()
                     except Exception as exc:
                         future.set_exception(exc)
-
-                loop.create_task(_wrapper())
+                
+                thread = threading.Thread(target=_run_in_thread, daemon=True)
+                thread.start()
                 try:
-                    return future.result(timeout=5)
+                    return future.result(timeout=10)
                 except concurrent.futures.TimeoutError:
                     raise RuntimeError(
                         "Redis session operation timed out. "
@@ -177,11 +186,11 @@ class RedisSessionInterface(SessionInterface):
             if data:
                 try:
                     if isinstance(data, (bytes, str)):
-                        loaded = json.loads(data)
+                        loaded = json_loads(data)
                     else:
                         loaded = data
                     session.update(loaded)
-                except (json.JSONDecodeError, TypeError):
+                except Exception:
                     pass
             session.sid = sid
         else:
@@ -208,7 +217,7 @@ class RedisSessionInterface(SessionInterface):
             return
 
         redis = self._get_redis(app)
-        data = json.dumps(dict(session))
+        data = json_dumps(dict(session))
         try:
             self._run_sync_or_async(redis.set(self.prefix + session.sid, data, ex=ttl))
         except Exception:

@@ -1,6 +1,7 @@
 import urllib.parse
-import json
 from typing import AsyncIterator, Dict, Any, List, Optional
+
+from fenrir.json import json_loads
 
 class Request:
     def __init__(self, scope: Dict[str, Any]):
@@ -116,8 +117,8 @@ class Request:
     def json(self) -> Any:
         if self._json is None and self._body:
             try:
-                self._json = json.loads(self._body.decode("utf-8"))
-            except (ValueError, UnicodeDecodeError):
+                self._json = json_loads(self._body)
+            except Exception:
                 self._json = None
         return self._json
 

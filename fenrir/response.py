@@ -1,8 +1,10 @@
-import json
 import mimetypes
 import os
 from typing import AsyncGenerator, AsyncIterable, Callable, Dict, Any, Generator, Iterable, Optional, Union, List, Tuple
 from http.cookies import SimpleCookie
+
+# Import orjson via fenrir.json
+from fenrir.json import _orjson, _HAS_ORJSON
 
 class Response:
     def __init__(
@@ -85,6 +87,9 @@ class Response:
             
             if app is not None and hasattr(app, "json"):
                 return app.json.loads(self._body.decode("utf-8"))
+            if _HAS_ORJSON:
+                return _orjson.loads(self._body)
+            import json
             return json.loads(self._body.decode("utf-8"))
         except ValueError:
             return None
@@ -99,7 +104,12 @@ class Response:
             
         if app is not None and hasattr(app, "json"):
             dumped = app.json.dumps(value)
+        elif _HAS_ORJSON:
+            dumped = _orjson.dumps(value)
+            if isinstance(dumped, bytes):
+                dumped = dumped.decode("utf-8")
         else:
+            import json
             dumped = json.dumps(value)
             
         self._body = dumped.encode("utf-8") if isinstance(dumped, str) else dumped
@@ -138,7 +148,8 @@ class Response:
             cookie["samesite"] = samesite
 
     def delete_cookie(self, key: str, path: str = "/", domain: str = None):
-        self.set_cookie(key, value="", max_age=0, expires=0, path=path, domain=domain)
+        # Use a past date to ensure browsers delete the cookie
+        self.set_cookie(key, value="", max_age=0, expires="Thu, 01 Jan 1970 00:00:00 GMT", path=path, domain=domain)
 
     def get_asgi_headers(self) -> List[Tuple[bytes, bytes]]:
         headers_list = []
@@ -167,8 +178,12 @@ class JSONResponse(Response):
         if app is not None and hasattr(app, "json"):
             body = app.json.dumps(content)
         else:
-            from fenrir.json import DefaultJSONProvider
-            body = DefaultJSONProvider(None).dumps(content)
+            if _HAS_ORJSON:
+                result = _orjson.dumps(content)
+                body = result.decode("utf-8") if isinstance(result, bytes) else result
+            else:
+                from fenrir.json import DefaultJSONProvider
+                body = DefaultJSONProvider(None).dumps(content)
             
         super().__init__(
             body=body,

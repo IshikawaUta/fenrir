@@ -1,8 +1,13 @@
+"""
+Fenrir Framework — A hybrid Python web framework.
+
+Optimized for performance with lazy imports and fast startup.
+"""
+from __future__ import annotations
+
+# Core imports only (fast startup)
 from fenrir.app import Fenrir, Blueprint
 from fenrir.context import request, g, current_app, session
-from fenrir.dependencies import Depends, Query, Header, Cookie, Body, Path, Form, File
-from fenrir.upload import UploadFile
-from fenrir.websocket import WebSocket, WebSocketDisconnect, WebSocketTimeout
 from fenrir.exceptions import (
     HTTPException,
     HTTPBadRequest,
@@ -24,55 +29,165 @@ from fenrir.response import (
     FileResponse,
     PlainTextResponse,
 )
-from fenrir.templating import render_template, BaseTemplateRenderer, Jinja2Renderer
-from fenrir.views import View, MethodView
-from fenrir.helpers import url_for, send_file, send_from_directory, redirect
-from fenrir.routing import Router, Route, APIRouter, RouteTrie
-from fenrir.sse import EventSourceResponse
-from fenrir.security import (
-    APIKeyCookie,
-    APIKeyHeader,
-    APIKeyQuery,
-    HTTPBasic,
-    HTTPBearer,
-    HTTPDigest,
-    OAuth2PasswordBearer,
-    OAuth2AuthorizationCodeBearer,
-    OpenIDConnect,
-    WebSocketTokenAuth,
-)
-from fenrir.background import BackgroundTasks, BackgroundTask
-from fenrir.compat import WsgiToAsgi, install_bottle_compat, install_falcon_compat, install_sanic_compat
-from fenrir.bottle import Bottle
-import fenrir.bottle as bottle
-import fenrir.falcon as falcon
-import fenrir.sanic as sanic
-from fenrir.testing import TestClient, FenrirTestClient
-from fenrir.middleware import (
-    CORSMiddleware,
-    GZipMiddleware,
-    RequestIDMiddleware,
-    RateLimitMiddleware,
-    BodyLimitMiddleware,
-    CSRFMiddleware,
-)
-from fenrir.pool import ConnectionPool, DatabasePool
-from fenrir.http2 import HTTP2Push
-from fenrir.pagination import PaginationParams, paginate, paginate_dict
-from fenrir.sessions import (
-    RedisSessionInterface,
-    InMemorySessionInterface,
-    InMemorySessionBackend,
-    ServerSideSession,
-)
-from fenrir.monitoring.core import init_monitoring, record_request, check_site_health, check_site_health_async, get_traffic_stats
-from fenrir.features import init_fenrir_monitoring
+
+# Lazy-loaded modules (deferred until needed)
+_LAZY_IMPORTS = {
+    # Dependency injection
+    "Depends": ("fenrir.dependencies", "Depends"),
+    "Query": ("fenrir.dependencies", "Query"),
+    "Header": ("fenrir.dependencies", "Header"),
+    "Cookie": ("fenrir.dependencies", "Cookie"),
+    "Body": ("fenrir.dependencies", "Body"),
+    "Path": ("fenrir.dependencies", "Path"),
+    "Form": ("fenrir.dependencies", "Form"),
+    "File": ("fenrir.dependencies", "File"),
+    "Annotated": ("fenrir.compat", "Annotated"),
+    # File upload
+    "UploadFile": ("fenrir.upload", "UploadFile"),
+    # WebSocket
+    "WebSocket": ("fenrir.websocket", "WebSocket"),
+    "WebSocketDisconnect": ("fenrir.websocket", "WebSocketDisconnect"),
+    "WebSocketTimeout": ("fenrir.websocket", "WebSocketTimeout"),
+    # Templating
+    "render_template": ("fenrir.templating", "render_template"),
+    "BaseTemplateRenderer": ("fenrir.templating", "BaseTemplateRenderer"),
+    "Jinja2Renderer": ("fenrir.templating", "Jinja2Renderer"),
+    # Views
+    "View": ("fenrir.views", "View"),
+    "MethodView": ("fenrir.views", "MethodView"),
+    # Helpers
+    "url_for": ("fenrir.helpers", "url_for"),
+    "send_file": ("fenrir.helpers", "send_file"),
+    "send_from_directory": ("fenrir.helpers", "send_from_directory"),
+    "redirect": ("fenrir.helpers", "redirect"),
+    # Routing
+    "Router": ("fenrir.routing", "Router"),
+    "Route": ("fenrir.routing", "Route"),
+    "APIRouter": ("fenrir.routing", "APIRouter"),
+    "RouteTrie": ("fenrir.routing", "RouteTrie"),
+    # SSE
+    "EventSourceResponse": ("fenrir.sse", "EventSourceResponse"),
+    # Security
+    "APIKeyCookie": ("fenrir.security", "APIKeyCookie"),
+    "APIKeyHeader": ("fenrir.security", "APIKeyHeader"),
+    "APIKeyQuery": ("fenrir.security", "APIKeyQuery"),
+    "HTTPBasic": ("fenrir.security", "HTTPBasic"),
+    "HTTPBearer": ("fenrir.security", "HTTPBearer"),
+    "HTTPDigest": ("fenrir.security", "HTTPDigest"),
+    "OAuth2PasswordBearer": ("fenrir.security", "OAuth2PasswordBearer"),
+    "OAuth2AuthorizationCodeBearer": ("fenrir.security", "OAuth2AuthorizationCodeBearer"),
+    "OpenIDConnect": ("fenrir.security", "OpenIDConnect"),
+    "WebSocketTokenAuth": ("fenrir.security", "WebSocketTokenAuth"),
+    # Background tasks
+    "BackgroundTasks": ("fenrir.background", "BackgroundTasks"),
+    "BackgroundTask": ("fenrir.background", "BackgroundTask"),
+    # WSGI/Falcon/Sanic compat
+    "WsgiToAsgi": ("fenrir.compat", "WsgiToAsgi"),
+    "install_bottle_compat": ("fenrir.compat", "install_bottle_compat"),
+    "install_falcon_compat": ("fenrir.compat", "install_falcon_compat"),
+    "install_sanic_compat": ("fenrir.compat", "install_sanic_compat"),
+    # Bottle
+    "Bottle": ("fenrir.bottle", "Bottle"),
+    # Testing
+    "TestClient": ("fenrir.testing", "TestClient"),
+    "FenrirTestClient": ("fenrir.testing", "FenrirTestClient"),
+    # Middleware
+    "CORSMiddleware": ("fenrir.middleware", "CORSMiddleware"),
+    "GZipMiddleware": ("fenrir.middleware", "GZipMiddleware"),
+    "RequestIDMiddleware": ("fenrir.middleware", "RequestIDMiddleware"),
+    "RateLimitMiddleware": ("fenrir.middleware", "RateLimitMiddleware"),
+    "BodyLimitMiddleware": ("fenrir.middleware", "BodyLimitMiddleware"),
+    "CSRFMiddleware": ("fenrir.middleware", "CSRFMiddleware"),
+    # Connection Pooling
+    "ConnectionPool": ("fenrir.pool", "ConnectionPool"),
+    "DatabasePool": ("fenrir.pool", "DatabasePool"),
+    # HTTP/2 Push
+    "HTTP2Push": ("fenrir.http2", "HTTP2Push"),
+    # Pagination
+    "PaginationParams": ("fenrir.pagination", "PaginationParams"),
+    "paginate": ("fenrir.pagination", "paginate"),
+    "paginate_dict": ("fenrir.pagination", "paginate_dict"),
+    # Sessions
+    "RedisSessionInterface": ("fenrir.sessions", "RedisSessionInterface"),
+    "InMemorySessionInterface": ("fenrir.sessions", "InMemorySessionInterface"),
+    "InMemorySessionBackend": ("fenrir.sessions", "InMemorySessionBackend"),
+    "ServerSideSession": ("fenrir.sessions", "ServerSideSession"),
+    # Monitoring
+    "init_monitoring": ("fenrir.monitoring.core", "init_monitoring"),
+    "record_request": ("fenrir.monitoring.core", "record_request"),
+    "check_site_health": ("fenrir.monitoring.core", "check_site_health"),
+    "check_site_health_async": ("fenrir.monitoring.core", "check_site_health_async"),
+    "get_traffic_stats": ("fenrir.monitoring.core", "get_traffic_stats"),
+    "init_fenrir_monitoring": ("fenrir.features", "init_fenrir_monitoring"),
+    # Plugin system
+    "Plugin": ("fenrir.plugins", "Plugin"),
+    "PluginRegistry": ("fenrir.plugins", "PluginRegistry"),
+    "plugin_hook": ("fenrir.plugins", "plugin_hook"),
+    "setup_plugins": ("fenrir.plugins", "setup_plugins"),
+    "PluginError": ("fenrir.plugins", "PluginError"),
+    "PluginDependencyError": ("fenrir.plugins", "PluginDependencyError"),
+    "PluginConfigError": ("fenrir.plugins", "PluginConfigError"),
+    "PluginVersionError": ("fenrir.plugins", "PluginVersionError"),
+    "PluginHealth": ("fenrir.plugins", "PluginHealth"),
+    # Hook/extension points
+    "HookRegistry": ("fenrir.hooks", "HookRegistry"),
+    "get_hooks": ("fenrir.hooks", "get_hooks"),
+    # ORM
+    "Database": ("fenrir.orm", "Database"),
+    "Model": ("fenrir.orm", "Model"),
+    # Caching
+    "Cache": ("fenrir.cache", "Cache"),
+    "MemoryCache": ("fenrir.cache", "MemoryCache"),
+    "RedisCache": ("fenrir.cache", "RedisCache"),
+    "FileCache": ("fenrir.cache", "FileCache"),
+    # Queue/Job system
+    "Queue": ("fenrir.queue", "Queue"),
+    "Job": ("fenrir.queue", "Job"),
+    "Worker": ("fenrir.queue", "Worker"),
+    "MemoryQueue": ("fenrir.queue", "MemoryQueue"),
+    "RedisQueue": ("fenrir.queue", "RedisQueue"),
+    # Performance
+    "optimize_app": ("fenrir.performance", "optimize_app"),
+    "ResponseCache": ("fenrir.performance", "ResponseCache"),
+    "ObjectPool": ("fenrir.performance", "ObjectPool"),
+}
+
+# Sub-module imports (lazy)
+_SUBMODULE_IMPORTS = {
+    "bottle": "fenrir.bottle",
+    "falcon": "fenrir.falcon",
+    "sanic": "fenrir.sanic",
+    "orm": "fenrir.orm",
+    "graphql": "fenrir.graphql",
+    "grpc": "fenrir.grpc",
+    "performance": "fenrir.performance",
+}
+
+__version__ = "4.0.0"
 
 
-# Re-export Annotated for convenient use with param markers
-from fenrir.compat import Annotated
+def __getattr__(name: str):
+    """Lazy import for performance."""
+    # Check lazy imports
+    if name in _LAZY_IMPORTS:
+        module_path, attr_name = _LAZY_IMPORTS[name]
+        import importlib
+        module = importlib.import_module(module_path)
+        value = getattr(module, attr_name)
+        # Cache for subsequent access
+        globals()[name] = value
+        return value
 
-__version__ = "3.1.3"
+    # Check sub-module imports
+    if name in _SUBMODULE_IMPORTS:
+        import importlib
+        module = importlib.import_module(_SUBMODULE_IMPORTS[name])
+        globals()[name] = module
+        return module
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     # Core app
     "Fenrir",
@@ -194,5 +309,40 @@ __all__ = [
     "get_traffic_stats",
     # Features
     "init_fenrir_monitoring",
+    # Plugin system
+    "Plugin",
+    "PluginRegistry",
+    "plugin_hook",
+    "setup_plugins",
+    "PluginError",
+    "PluginDependencyError",
+    "PluginConfigError",
+    "PluginVersionError",
+    "PluginHealth",
+    # Hook/extension points
+    "HookRegistry",
+    "get_hooks",
+    # ORM
+    "Database",
+    "Model",
+    "orm",
+    # Caching
+    "Cache",
+    "MemoryCache",
+    "RedisCache",
+    "FileCache",
+    # Queue/Job system
+    "Queue",
+    "Job",
+    "Worker",
+    "MemoryQueue",
+    "RedisQueue",
+    # GraphQL/gRPC (lazy-loaded)
+    "graphql",
+    "grpc",
+    # Performance module
+    "performance",
+    "optimize_app",
+    "ResponseCache",
+    "ObjectPool",
 ]
-

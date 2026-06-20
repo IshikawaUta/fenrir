@@ -350,7 +350,8 @@ class FenrirDispatchMixin:
                     ta.dump_python(raw, exclude_unset=exclude_unset, exclude_defaults=exclude_defaults, include=include, exclude=exclude),
                     status=status,
                 )
-        except Exception:
+        except Exception as e:
+            logger.debug("Response model serialization failed, falling back to coerce: %s", e)
             return self._coerce_response(content)
 
     def _coerce_response(self, content: Any) -> Response:
