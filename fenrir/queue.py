@@ -148,22 +148,28 @@ class MemoryQueue(QueueBackend):
     """
 
     def __init__(self, max_size: int = 10000) -> None:
-        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._queue: Optional[asyncio.PriorityQueue] = None
         self._jobs: Dict[str, Job] = {}
         self._processing: Set[str] = set()
         self._max_size = max_size
         self._cleanup_entries: List[tuple] = []  # (timestamp, job_id)
         self._cleanup_task: Optional[asyncio.Task] = None
 
+    def _get_queue(self) -> asyncio.PriorityQueue:
+        if self._queue is None:
+            self._queue = asyncio.PriorityQueue()
+        return self._queue
+
     async def enqueue(self, job: Job) -> None:
         self._jobs[job.id] = job
-        await self._queue.put((-job.priority, job.created_at, job.id))
+        await self._get_queue().put((-job.priority, job.created_at, job.id))
         logger.debug("Enqueued job %s (handler=%s)", job.id, job.handler)
 
     async def dequeue(self) -> Optional[Job]:
-        while not self._queue.empty():
+        q = self._get_queue()
+        while not q.empty():
             try:
-                _, _, job_id = self._queue.get_nowait()
+                _, _, job_id = q.get_nowait()
                 job = self._jobs.get(job_id)
                 if job and job.status in (JobStatus.PENDING, JobStatus.RETRY):
                     self._processing.add(job_id)
@@ -190,7 +196,7 @@ class MemoryQueue(QueueBackend):
 
     async def requeue(self, job: Job) -> None:
         job.status = JobStatus.PENDING
-        await self._queue.put((-job.priority, job.created_at, job.id))
+        await self._get_queue().put((-job.priority, job.created_at, job.id))
 
     async def get_job(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)

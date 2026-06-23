@@ -7,10 +7,14 @@ from fenrir.cache import RedisCache, Cache
 
 @pytest.fixture
 def fake_redis():
-    """Create a fakeredis instance."""
+    """Create a fakeredis instance with proper event loop for Python 3.9."""
     import fakeredis.aioredis
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     server = fakeredis.FakeServer()
-    return fakeredis.aioredis.FakeRedis(server=server)
+    r = fakeredis.aioredis.FakeRedis(server=server)
+    yield r
+    loop.close()
 
 
 @pytest.fixture
