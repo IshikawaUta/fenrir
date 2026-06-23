@@ -6,10 +6,12 @@ that integrate seamlessly with Fenrir's ASGI pipeline.
 """
 from __future__ import annotations
 
+import asyncio
 import gzip
 import logging
 import time
 import uuid
+import zlib
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -59,14 +61,13 @@ class CORSMiddleware:
     def _get_cors_headers(self, origin: Optional[str], is_preflight: bool = False) -> Dict[str, str]:
         headers: Dict[str, str] = {}
         if origin and self._is_origin_allowed(origin):
-            # When credentials are allowed with wildcard origins, echo the
-            # specific origin per CORS spec (browsers reject "*" with credentialed requests).
-            if self._all_origins and self.allow_credentials:
-                headers["access-control-allow-origin"] = origin
-            else:
-                headers["access-control-allow-origin"] = origin
+            # Always echo the specific origin when origin is present and allowed.
+            # This is the standard CORS behavior — browsers reject "*" with
+            # credentialed requests, so echoing is the safe default.
+            headers["access-control-allow-origin"] = origin
             headers["vary"] = "Origin"
-        elif self._all_origins and not self.allow_credentials:
+        elif self._all_origins and not origin:
+            # Only use "*" when no origin header is present (e.g., server-to-server)
             headers["access-control-allow-origin"] = "*"
 
         if self.allow_credentials:
@@ -215,9 +216,12 @@ class GZipMiddleware:
         bypass = False
         is_streaming = False
         headers_sent = False
+        compressible = False
+        compress_obj = None
 
         async def send_wrapper(message: Dict[str, Any]) -> None:
             nonlocal initial_message, content_type_value, bypass, is_streaming, headers_sent
+            nonlocal compressible, compress_obj
 
             if message["type"] == "http.response.start":
                 status = message.get("status", 200)
@@ -247,8 +251,16 @@ class GZipMiddleware:
 
                     if is_streaming and chunk:
                         if not headers_sent:
+                            if initial_message is None:
+                                # App sent body before headers — pass through
+                                await send(message)
+                                return
+                            compressible = self._is_compressible(content_type_value)
                             hdrs = dict(initial_message.get("headers", []))
-                            if self._is_compressible(content_type_value):
+                            if compressible:
+                                compress_obj = zlib.compressobj(
+                                    self.compresslevel, zlib.DEFLATED, 31
+                                )
                                 hdrs[b"content-encoding"] = b"gzip"
                             hdrs.pop(b"content-length", None)
                             hdrs.pop(b"transfer-encoding", None)
@@ -258,9 +270,13 @@ class GZipMiddleware:
                                 "headers": list(hdrs.items()),
                             })
                             headers_sent = True
-                        if self._is_compressible(content_type_value) and len(chunk) >= self.minimum_size:
-                            chunk = gzip.compress(chunk, compresslevel=self.compresslevel)
-                        await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                        if compressible and compress_obj is not None:
+                            compressed = compress_obj.compress(chunk)
+                            compressed += compress_obj.flush(zlib.Z_SYNC_FLUSH)
+                            if compressed:
+                                await send({"type": "http.response.body", "body": compressed, "more_body": True})
+                        else:
+                            await send({"type": "http.response.body", "body": chunk, "more_body": True})
                     else:
                         body_chunks.append(chunk)
                     return
@@ -269,11 +285,24 @@ class GZipMiddleware:
                 body_chunks.append(chunk)
                 full_body = b"".join(body_chunks)
 
-                # Streaming already sent headers — just send the final body
+                # Streaming already sent headers — send final compressed chunk
                 if headers_sent:
-                    await send({"type": "http.response.body", "body": full_body, "more_body": False})
+                    if compressible and compress_obj is not None:
+                        compressed = compress_obj.compress(chunk)
+                        compressed += compress_obj.flush(zlib.Z_FINISH)
+                        if compressed:
+                            await send({"type": "http.response.body", "body": compressed, "more_body": False})
+                        else:
+                            await send({"type": "http.response.body", "body": b"", "more_body": False})
+                    else:
+                        await send({"type": "http.response.body", "body": full_body, "more_body": False})
                     return
 
+                # Non-streaming path: accumulate then compress once
+                if initial_message is None:
+                    # No headers received — pass through
+                    await send(message)
+                    return
                 if (
                     len(full_body) >= self.minimum_size
                     and self._is_compressible(content_type_value)
@@ -400,6 +429,7 @@ class RateLimitMiddleware:
         self._redis = redis_client
         self._requests: Dict[str, List[float]] = defaultdict(list)
         self._last_cleanup = time.monotonic()
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def _default_key(scope: Dict[str, Any]) -> str:
@@ -411,7 +441,7 @@ class RateLimitMiddleware:
             return client[0]
         return "unknown"
 
-    def _cleanup(self) -> None:
+    async def _cleanup(self) -> None:
         now = time.monotonic()
         if now - self._last_cleanup < self.window_seconds:
             return
@@ -419,22 +449,32 @@ class RateLimitMiddleware:
         cutoff = now - self.window_seconds
         expired_keys = []
         for key, timestamps in self._requests.items():
-            self._requests[key] = [t for t in timestamps if t > cutoff]
-            if not self._requests[key]:
+            # Only remove from front (oldest entries) — O(1) per entry
+            while timestamps and timestamps[0] <= cutoff:
+                timestamps.popleft()
+            if not timestamps:
                 expired_keys.append(key)
         for key in expired_keys:
             del self._requests[key]
 
-    def _is_rate_limited(self, key: str) -> Tuple[bool, float]:
-        now = time.monotonic()
-        cutoff = now - self.window_seconds
-        self._requests[key] = [t for t in self._requests[key] if t > cutoff]
-        if len(self._requests[key]) >= self.max_requests:
-            oldest = self._requests[key][0]
-            retry_after = self.window_seconds - (now - oldest)
-            return True, max(retry_after, 0.0)
-        self._requests[key].append(now)
-        return False, 0.0
+    async def _is_rate_limited(self, key: str) -> Tuple[bool, float]:
+        async with self._lock:
+            now = time.monotonic()
+            cutoff = now - self.window_seconds
+            timestamps = self._requests.get(key)
+            if timestamps is None:
+                from collections import deque
+                timestamps = deque()
+                self._requests[key] = timestamps
+            # Only remove from front — O(1) per expired entry
+            while timestamps and timestamps[0] <= cutoff:
+                timestamps.popleft()
+            if len(timestamps) >= self.max_requests:
+                oldest = timestamps[0]
+                retry_after = self.window_seconds - (now - oldest)
+                return True, max(retry_after, 0.0)
+            timestamps.append(now)
+            return False, 0.0
 
     async def _is_rate_limited_redis(self, key: str) -> Tuple[bool, float]:
         """Distributed rate limiting using Redis sliding window."""
@@ -470,8 +510,8 @@ class RateLimitMiddleware:
         if self._redis is not None:
             limited, retry_after = await self._is_rate_limited_redis(key)
         else:
-            self._cleanup()
-            limited, retry_after = self._is_rate_limited(key)
+            await self._cleanup()
+            limited, retry_after = await self._is_rate_limited(key)
 
         if limited:
             headers = [
@@ -543,6 +583,7 @@ class BodyLimitMiddleware:
         # For chunked or unknown-length bodies, monitor actual size
         total_received = 0
         exceeded = False
+        response_started = False
 
         async def monitored_receive():
             nonlocal total_received, exceeded
@@ -552,11 +593,16 @@ class BodyLimitMiddleware:
                 total_received += len(chunk)
                 if total_received > self.max_content_length and not exceeded:
                     exceeded = True
+                    # Drain remaining body chunks
+                    while message.get("more_body", False):
+                        message = await receive()
             return message
 
         # Wrap send to reject if body exceeded
         async def guarded_send(message):
-            if exceeded and message["type"] == "http.response.start":
+            nonlocal response_started
+            if exceeded and message["type"] == "http.response.start" and not response_started:
+                response_started = True
                 body = json_dumps({"detail": f"Request body too large. Maximum size is {self.max_content_length} bytes."})
                 await send({
                     "type": "http.response.start",
@@ -568,6 +614,8 @@ class BodyLimitMiddleware:
                 })
                 await send({"type": "http.response.body", "body": body.encode("utf-8")})
                 return
+            if exceeded and message["type"] == "http.response.body":
+                return  # Drop body chunks after rejection
             await send(message)
 
         await self.app(scope, monitored_receive, guarded_send)
@@ -608,13 +656,7 @@ class CSRFMiddleware:
         self.auto_generate = auto_generate
 
     def _generate_token(self) -> str:
-        import hmac
-        import hashlib
-        import time
         import secrets
-        if self.secret_key:
-            ts = str(int(time.time()))
-            return hmac.new(self.secret_key.encode(), ts.encode(), hashlib.sha256).hexdigest()
         return secrets.token_hex(32)
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
@@ -625,7 +667,17 @@ class CSRFMiddleware:
         method = scope.get("method", "").upper()
         if method in self.safe_methods:
             if self.auto_generate:
-                token = self._generate_token()
+                # Reuse existing valid token from cookie if present
+                existing_token = None
+                for k, v in scope.get("headers", []):
+                    if k == b"cookie":
+                        cookie_str = v.decode("latin-1")
+                        for part in cookie_str.split(";"):
+                            part = part.strip()
+                            if part.startswith(f"{self.cookie_name}="):
+                                existing_token = part.split("=", 1)[1]
+                                break
+                token = existing_token if existing_token else self._generate_token()
                 async def send_with_csrf(message: Dict[str, Any]) -> None:
                     if message["type"] == "http.response.start":
                         headers = dict(message.get("headers", []))

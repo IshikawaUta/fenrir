@@ -68,7 +68,7 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
             openapi_schema["paths"][clean_path] = {}
 
         for method in route.methods:
-            if method in ("OPTIONS", "WEBSOCKET"):
+            if method in ("OPTIONS", "WEBSOCKET", "HEAD"):
                 continue
 
             m_lower = method.lower()

@@ -171,20 +171,27 @@ def init_monitoring(app: Any, config: Optional[Dict[str, Any]] = None):
     app.config["MONITORING_SITES"] = config.get("sites", [])
     app.config["MONITORING_CHECK_INTERVAL"] = config.get("check_interval", 60)
     
-    password = os.getenv("MONITORING_PASSWORD", "changeme")
+    password = os.getenv("MONITORING_PASSWORD", "")
     allow_default = os.getenv("MONITORING_ALLOW_DEFAULT_PASSWORD", "").lower() == "true"
     if password == "changeme" and enabled and not allow_default:
+        raise ValueError(
+            "MONITORING_PASSWORD must be set to a secure value when MONITORING_ENABLED=true. "
+            "'changeme' is not allowed. Set a secure MONITORING_PASSWORD in your .env file, "
+            "or set MONITORING_ALLOW_DEFAULT_PASSWORD=true to override (not recommended for production)."
+        )
+    if not password and enabled and not allow_default:
         raise ValueError(
             "MONITORING_PASSWORD must be set when MONITORING_ENABLED=true. "
             "Set MONITORING_PASSWORD in your .env file, or set "
             "MONITORING_ALLOW_DEFAULT_PASSWORD=true to override (not recommended for production)."
         )
-    if password == "changeme":
+    if not password:
         import logging
         logging.warning(
-            "MONITORING_PASSWORD not set. Using default 'changeme'. "
+            "MONITORING_PASSWORD not set. Monitoring auth disabled. "
             "Set MONITORING_PASSWORD in your .env file for production."
         )
+        password = "changeme"  # Fallback for disabled monitoring
     app.config["MONITORING_PASSWORD_HASH"] = _hash_password(password)
     
     if not enabled:
@@ -219,8 +226,41 @@ def record_request(path: str, method: str, status_code: int, response_time: floa
         _save_data()
 
 
-def check_site_health(url: str) -> Dict[str, Any]:
-    """Check the health of a single site (synchronous, use in thread for async)."""
+def _validate_url_for_ssrf(url: str) -> bool:
+    """Validate URL to prevent SSRF attacks. Returns True if safe."""
+    from urllib.parse import urlparse
+    import ipaddress
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Block private/internal IP ranges
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return False
+        except ValueError:
+            # hostname is a domain name, not an IP — allow
+            pass
+        # Block common internal hostnames
+        blocked = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+        if hostname.lower() in blocked:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def check_site_health(url: str, allowed_sites: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Check the health of a single site (synchronous, use in thread for async).
+    
+    Args:
+        url: The URL to check
+        allowed_sites: List of user-configured sites that bypass SSRF validation
+    """
     import urllib.request
     import urllib.error
     
@@ -233,23 +273,29 @@ def check_site_health(url: str) -> Dict[str, Any]:
         "error": None,
     }
     
-    try:
-        start = time.time()
-        req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", "Fenrir-Monitoring/1.0")
-        
-        with urllib.request.urlopen(req, timeout=10) as response:
-            elapsed = time.time() - start
-            result["status_code"] = response.status
-            result["response_time"] = round(elapsed * 1000, 2)
-            result["status"] = "healthy" if 200 <= response.status < 400 else "degraded"
-    except urllib.error.HTTPError as e:
-        result["status_code"] = e.code
-        result["status"] = "degraded"
-        result["error"] = str(e)
-    except Exception as e:
-        result["status"] = "down"
-        result["error"] = str(e)
+    # Validate URL to prevent SSRF, but allow user-configured sites
+    is_allowed = allowed_sites and url in allowed_sites
+    if not is_allowed and not _validate_url_for_ssrf(url):
+        result["status"] = "error"
+        result["error"] = "URL validation failed: blocked private/internal address"
+    else:
+        try:
+            start = time.time()
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("User-Agent", "Fenrir-Monitoring/1.0")
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                elapsed = time.time() - start
+                result["status_code"] = response.status
+                result["response_time"] = round(elapsed * 1000, 2)
+                result["status"] = "healthy" if 200 <= response.status < 400 else "degraded"
+        except urllib.error.HTTPError as e:
+            result["status_code"] = e.code
+            result["status"] = "degraded"
+            result["error"] = str(e)
+        except Exception as e:
+            result["status"] = "down"
+            result["error"] = str(e)
     
     _monitoring_data["health_checks"][url] = result
     
@@ -267,10 +313,10 @@ def check_site_health(url: str) -> Dict[str, Any]:
     return result
 
 
-async def check_site_health_async(url: str) -> Dict[str, Any]:
+async def check_site_health_async(url: str, allowed_sites: Optional[List[str]] = None) -> Dict[str, Any]:
     """Check the health of a single site (async wrapper using thread pool)."""
     from fenrir.compat import to_thread
-    return await to_thread(check_site_health, url)
+    return await to_thread(check_site_health, url, allowed_sites)
 
 
 def get_uptime_stats() -> Dict[str, Any]:

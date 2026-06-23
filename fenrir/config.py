@@ -21,7 +21,25 @@ class Config(dict):
                 self[key] = value
 
     def from_pyfile(self, filename: str, silent: bool = False) -> bool:
-        filepath = os.path.join(self.root_path, filename)
+        """Load configuration from a Python file.
+
+        .. warning::
+            This method executes arbitrary Python code from the config file.
+            Only load config files from trusted sources. Never load config
+            files from user-uploaded content or untrusted paths.
+        """
+        if os.path.isabs(filename):
+            filepath = filename
+        else:
+            filepath = os.path.join(self.root_path, filename)
+        # Security: ensure the resolved path is within root_path (for relative paths)
+        if not os.path.isabs(filename):
+            real_root = os.path.realpath(self.root_path)
+            real_filepath = os.path.realpath(filepath)
+            if not real_filepath.startswith(real_root + os.sep) and real_filepath != real_root:
+                raise ValueError(
+                    f"Config file '{filename}' is outside the application root directory."
+                )
         d = types.ModuleType("config")
         d.__file__ = filepath
         try:

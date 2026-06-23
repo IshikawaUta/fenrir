@@ -32,7 +32,6 @@ class FenrirDispatchMixin:
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable):
         import fenrir.app as _app_mod
         _app_mod._active_app = self
-        from fenrir.context import _app_ctx_var
         _app_ctx_var.set(self)
 
         if self._asgi_middlewares and not self._asgi_app:
@@ -57,7 +56,6 @@ class FenrirDispatchMixin:
     async def _dispatch(self, scope: Dict[str, Any], receive: Callable, send: Callable):
         import fenrir.app as _app_mod
         _app_mod._active_app = self
-        from fenrir.context import _app_ctx_var
         _app_ctx_var.set(self)
 
         scope_type = scope.get("type")
@@ -103,13 +101,27 @@ class FenrirDispatchMixin:
                 await wsgi_adapter(patched_scope, receive, send)
                 return
 
+        # ── ASGI sub-app mounts ────────────────────────────────────────
+        for prefix, asgi_app in self._asgi_mounts:
+            if req_path == prefix or req_path.startswith(prefix + "/"):
+                stripped = req_path[len(prefix):] or "/"
+                patched_scope = dict(scope)
+                patched_scope["path"] = stripped
+                patched_scope["root_path"] = scope.get("root_path", "") + prefix
+                await asgi_app(patched_scope, receive, send)
+                return
+
         # ── HTTP request pipeline ──────────────────────────────────────
         req = Request(scope)
         await req._read_body(receive)
         resp = Response(status=200)
 
         if self.session_interface:
-            req.session = self.session_interface.open_session(self, req)
+            try:
+                req.session = self.session_interface.open_session(self, req)
+            except Exception as e:
+                logger.warning("Failed to open session: %s", e)
+                req.session = None
 
         from fenrir.signals import request_started, request_finished, got_request_exception
         request_started.send(self)
@@ -166,9 +178,8 @@ class FenrirDispatchMixin:
                 # Response model
                 if not isinstance(response_obj, Response):
                     response_obj = self._apply_response_model(route, response_obj)
-                elif hasattr(route, "response_model") and route.response_model is not None:
-                    response_obj = self._apply_response_model(route, response_obj)
-                elif hasattr(route, "response_models") and route.response_models:
+                elif (hasattr(route, "response_model") and route.response_model is not None) or \
+                     (hasattr(route, "response_models") and route.response_models):
                     response_obj = self._apply_response_model(route, response_obj)
 
                 if not isinstance(response_obj, Response):
@@ -187,7 +198,10 @@ class FenrirDispatchMixin:
                         response_obj = self._coerce_response(res)
 
                 if self.session_interface and req.session is not None:
-                    self.session_interface.save_session(self, req.session, response_obj)
+                    try:
+                        self.session_interface.save_session(self, req.session, response_obj)
+                    except Exception as e:
+                        logger.warning("Failed to save session: %s", e)
 
                 request_finished.send(self, response=response_obj)
 
@@ -435,15 +449,16 @@ class FenrirDispatchMixin:
                 lineno = tb.tb_lineno
                 func_name = frame.f_code.co_name
 
-                # Try to read source context
+                # Try to read source context using linecache (cached)
                 code_context = []
                 try:
-                    with open(filename, "r", encoding="utf-8", errors="replace") as f:
-                        all_lines = f.readlines()
-                    start = max(0, lineno - 5)
-                    end = min(len(all_lines), lineno + 4)
-                    for i in range(start, end):
-                        code_context.append((i + 1, all_lines[i].rstrip("\n")))
+                    import linecache
+                    all_lines = linecache.getlines(filename)
+                    if all_lines:
+                        start = max(0, lineno - 5)
+                        end = min(len(all_lines), lineno + 4)
+                        for i in range(start, end):
+                            code_context.append((i + 1, all_lines[i].rstrip("\n")))
                 except (OSError, IOError):
                     pass
 

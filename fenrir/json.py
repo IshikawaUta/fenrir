@@ -144,7 +144,7 @@ class TaggedJSONSerializer:
             if isinstance(o, dict):
                 return {k: tag(v) for k, v in o.items()}
             if isinstance(o, list):
-                return [tag(v) for o_item in o for v in (o_item,)]
+                return [tag(item) for item in o]
             return o
 
         tagged = tag(obj)

@@ -35,6 +35,10 @@ def init_fenrir_monitoring(app: Any, **kwargs):
     
     init_monitoring(app, config or None)
     
+    # Only add request recording middleware if monitoring is enabled
+    if not app.config.get("MONITORING_ENABLED"):
+        return
+    
     # Add request recording middleware
     @app.after_request
     async def _monitoring_record(req, resp):

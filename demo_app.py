@@ -40,7 +40,7 @@ logger = logging.getLogger("demo")
 #   3. Program:   Fenrir(dev_mode=True) di bawah ini
 app = Fenrir(
     title="Fenrir Hybrid Framework Demo",
-    version="4.0.0",
+    version="4.1.0",
     dev_mode=os.getenv("FENRIR_DEV_MODE") == "1",
 )
 
@@ -56,8 +56,8 @@ class UserRegister(BaseModel):
     age: int
 
 async def verify_api_key(x_api_key: str = Header(default=None)):
-    if x_api_key != "super-secret-key":
-        # Raise HTTPException or return value
+    expected_key = os.getenv("API_KEY", "changeme-set-API_KEY-env")
+    if x_api_key != expected_key:
         logger.warning("Invalid API key provided!")
     return x_api_key
 

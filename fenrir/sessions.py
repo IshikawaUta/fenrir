@@ -52,12 +52,18 @@ class SessionInterface:
 
 class SecureCookieSessionInterface(SessionInterface):
     salt = "cookie-session"
+    _cached_key: Optional[str] = None
+    _cached_serializer: Optional[URLSafeTimedSerializer] = None
 
     def get_serializer(self, app: Any) -> Optional[URLSafeTimedSerializer]:
         secret_key = app.config.get("SECRET_KEY")
         if not secret_key:
             return None
-        return URLSafeTimedSerializer(secret_key, salt=self.salt)
+        if self._cached_key == secret_key and self._cached_serializer is not None:
+            return self._cached_serializer
+        self._cached_serializer = URLSafeTimedSerializer(secret_key, salt=self.salt)
+        self._cached_key = secret_key
+        return self._cached_serializer
 
     def open_session(self, app: Any, request: Any) -> SecureCookieSession:
         serializer = self.get_serializer(app)
@@ -139,33 +145,11 @@ class RedisSessionInterface(SessionInterface):
             except RuntimeError:
                 loop = None
             if loop and loop.is_running():
-                # Use run_coroutine_threadsafe to avoid blocking the event loop
-                import concurrent.futures
-                import threading
-                
-                future = concurrent.futures.Future()
-                
-                def _run_in_thread():
-                    try:
-                        new_loop = asyncio.new_event_loop()
-                        try:
-                            result = new_loop.run_until_complete(coro_or_value)
-                            future.set_result(result)
-                        finally:
-                            new_loop.close()
-                    except Exception as exc:
-                        future.set_exception(exc)
-                
-                thread = threading.Thread(target=_run_in_thread, daemon=True)
-                thread.start()
-                try:
-                    return future.result(timeout=10)
-                except concurrent.futures.TimeoutError:
-                    raise RuntimeError(
-                        "Redis session operation timed out. "
-                        "Ensure your Redis client supports sync operations "
-                        "or use a sync redis client (e.g., redis-py synchronous)."
-                    )
+                raise RuntimeError(
+                    "Cannot run async Redis operations from a synchronous "
+                    "function inside an async context. Use an async Redis "
+                    "client (e.g., redis.asyncio) or make open_session/save_session async."
+                )
             else:
                 return loop.run_until_complete(coro_or_value)
         return coro_or_value
@@ -241,9 +225,11 @@ class InMemorySessionBackend:
     def __init__(self):
         self._store: Dict[str, Dict[str, Any]] = {}
         self._expires: Dict[str, float] = {}
+        self._last_cleanup: float = 0
+        self._cleanup_interval: float = 30  # seconds
 
     def get(self, sid: str) -> Optional[Dict[str, Any]]:
-        self._cleanup()
+        self._maybe_cleanup()
         return self._store.get(sid)
 
     def set(self, sid: str, data: Dict[str, Any], ttl: int = 86400) -> None:
@@ -254,7 +240,19 @@ class InMemorySessionBackend:
         self._store.pop(sid, None)
         self._expires.pop(sid, None)
 
+    def _maybe_cleanup(self) -> None:
+        now = time.monotonic()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+        self._do_cleanup()
+
     def _cleanup(self) -> None:
+        """Force immediate cleanup of expired sessions."""
+        self._last_cleanup = 0
+        self._do_cleanup()
+
+    def _do_cleanup(self) -> None:
         now = time.monotonic()
         expired = [k for k, exp in self._expires.items() if exp < now]
         for k in expired:

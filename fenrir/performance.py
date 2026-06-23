@@ -362,7 +362,7 @@ def optimize_app(app: Any, **kwargs: Any) -> None:
                 # Set cached response on request — handler should check for this
                 req._cached_response = Response(
                     body=body,
-                    status_code=status,
+                    status=status,
                     headers=dict(headers) if headers else {},
                 )
 

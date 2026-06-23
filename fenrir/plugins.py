@@ -367,7 +367,16 @@ class PluginRegistry:
 
         if info["type"] == "lazy":
             try:
-                module = importlib.import_module(info["module"])
+                module_path = info["module"]
+                # Validate module path: must be a valid Python dotted name
+                if not all(part.isidentifier() for part in module_path.split(".")):
+                    logger.error(
+                        "Invalid module path '%s' for plugin '%s'. "
+                        "Module paths must contain only alphanumeric characters and dots.",
+                        module_path, name,
+                    )
+                    return None
+                module = importlib.import_module(module_path)
                 class_name = info.get("class")
                 if class_name:
                     plugin_cls = getattr(module, class_name)

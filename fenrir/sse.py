@@ -43,7 +43,12 @@ class EventSourceResponse(Response):
                     formatted = self._format_event(item)
                     await send_chunk(formatted)
             else:
-                for item in self.generator:
+                # Run sync generator in a thread to avoid blocking the event loop
+                import asyncio
+                def _collect_items():
+                    return list(self.generator)
+                items = await asyncio.get_event_loop().run_in_executor(None, _collect_items)
+                for item in items:
                     formatted = self._format_event(item)
                     await send_chunk(formatted)
         except Exception as e:

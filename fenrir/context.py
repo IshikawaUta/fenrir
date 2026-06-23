@@ -112,8 +112,12 @@ class RequestContext:
 
     def __enter__(self) -> "RequestContext":
         self.app_ctx.__enter__()
-        self._token_req = _request_ctx_var.set(self.request)
-        self._token_g = _g_ctx_var.set(G())
+        try:
+            self._token_req = _request_ctx_var.set(self.request)
+            self._token_g = _g_ctx_var.set(G())
+        except Exception:
+            self.app_ctx.__exit__(None, None, None)
+            raise
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):

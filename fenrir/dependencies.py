@@ -6,9 +6,54 @@ from fenrir.exceptions import HTTPUnprocessableEntity
 from fenrir.request import Request
 from fenrir.response import Response
 
+# Lazy imports for types used in hot path
+_BackgroundTasks = None
+_UploadFile = None
+_current_app = None
+
+
+def _get_background_tasks_class():
+    global _BackgroundTasks
+    if _BackgroundTasks is None:
+        from fenrir.background import BackgroundTasks
+        _BackgroundTasks = BackgroundTasks
+    return _BackgroundTasks
+
+
+def _get_upload_file_class():
+    global _UploadFile
+    if _UploadFile is None:
+        from fenrir.upload import UploadFile
+        _UploadFile = UploadFile
+    return _UploadFile
+
+
+def _get_current_app():
+    global _current_app
+    if _current_app is None:
+        from fenrir.context import current_app
+        _current_app = current_app
+    return _current_app
+
 # Module-level cache for inspect.signature() results — avoids repeated
 # signature introspection on every request for every handler/dependency.
 _signature_cache: Dict[Callable, inspect.Signature] = {}
+
+# Module-level cache for pydantic TypeAdapter — avoids recompilation on every request.
+_type_adapter_cache: Dict[type, TypeAdapter] = {}
+
+
+def _get_cached_type_adapter(annotation: type) -> TypeAdapter:
+    """Return a cached TypeAdapter for the given annotation."""
+    try:
+        return _type_adapter_cache[annotation]
+    except (KeyError, TypeError):
+        adapter = TypeAdapter(annotation)
+        try:
+            _type_adapter_cache[annotation] = adapter
+        except TypeError:
+            pass  # unhashable type, skip caching
+        return adapter
 
 
 def _get_cached_signature(func: Callable) -> inspect.Signature:
@@ -133,15 +178,12 @@ async def resolve_parameters(
         # BackgroundTasks auto-injection                                       #
         # ------------------------------------------------------------------ #
         if annotation is not inspect.Parameter.empty:
-            try:
-                from fenrir.background import BackgroundTasks as _BT
-                if annotation is _BT or (isinstance(annotation, type) and issubclass(annotation, _BT)):
-                    if not hasattr(req_obj, "_background_tasks"):
-                        req_obj._background_tasks = _BT()
-                    resolved[param_name] = req_obj._background_tasks
-                    continue
-            except ImportError:
-                pass
+            _BT = _get_background_tasks_class()
+            if annotation is _BT or (isinstance(annotation, type) and issubclass(annotation, _BT)):
+                if not hasattr(req_obj, "_background_tasks"):
+                    req_obj._background_tasks = _BT()
+                resolved[param_name] = req_obj._background_tasks
+                continue
 
         # Handle WebSocket injection
         if param_name in ("websocket", "ws") or (annotation != inspect.Parameter.empty and getattr(annotation, "__name__", "") == "WebSocket"):
@@ -172,7 +214,7 @@ async def resolve_parameters(
                     dep_func = real_dep
 
             # Apply dependency overrides if present
-            from fenrir.context import current_app
+            current_app = _get_current_app()
             try:
                 if hasattr(current_app, "dependency_overrides") and current_app.dependency_overrides:
                     if dep_func in current_app.dependency_overrides:
@@ -243,7 +285,7 @@ async def resolve_parameters(
             val = path_params[param_name]
             if annotation != inspect.Parameter.empty:
                 try:
-                    val = TypeAdapter(annotation).validate_python(val)
+                    val = _get_cached_type_adapter(annotation).validate_python(val)
                 except Exception as e:
                     raise HTTPUnprocessableEntity(
                         detail=[
@@ -265,7 +307,7 @@ async def resolve_parameters(
             is_file = True
         elif annotation != inspect.Parameter.empty:
             # Check if annotation is UploadFile or lists/unions containing it
-            from fenrir.upload import UploadFile
+            UploadFile = _get_upload_file_class()
             if annotation is UploadFile or getattr(annotation, "__name__", "") == "UploadFile":
                 is_file = True
             elif hasattr(annotation, "__origin__"):
@@ -311,7 +353,7 @@ async def resolve_parameters(
                 else:
                     if annotation != inspect.Parameter.empty:
                         try:
-                            val = TypeAdapter(annotation).validate_python(raw_val)
+                            val = _get_cached_type_adapter(annotation).validate_python(raw_val)
                         except Exception as e:
                             raise HTTPUnprocessableEntity(
                                 detail=[
@@ -337,7 +379,7 @@ async def resolve_parameters(
                 pass
                 
         if is_pydantic or isinstance(default, Body):
-            from fenrir.context import current_app
+            current_app = _get_current_app()
             strict = False
             try:
                 if hasattr(current_app, "strict_content_type"):
@@ -412,7 +454,7 @@ async def resolve_parameters(
         else:
             if annotation != inspect.Parameter.empty:
                 try:
-                    val = TypeAdapter(annotation).validate_python(raw_val)
+                    val = _get_cached_type_adapter(annotation).validate_python(raw_val)
                 except Exception as e:
                     raise HTTPUnprocessableEntity(
                         detail=[

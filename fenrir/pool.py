@@ -126,6 +126,8 @@ class ConnectionPool(Generic[T]):
 
     async def _release(self, item: _PoolItem[T]) -> None:
         """Release a connection back to the pool."""
+        if self._lock is None:
+            return
         async with self._lock:
             self._active -= 1
             if self._closed:
@@ -137,6 +139,9 @@ class ConnectionPool(Generic[T]):
 
     async def _discard(self, item: _PoolItem[T]) -> None:
         """Discard a broken connection."""
+        if self._lock is None:
+            await self._destroy_connection(item)
+            return
         async with self._lock:
             self._active -= 1
             self._semaphore.release()
@@ -145,6 +150,8 @@ class ConnectionPool(Generic[T]):
     async def close(self) -> None:
         """Close all connections in the pool."""
         self._closed = True
+        if self._lock is None:
+            return
         async with self._lock:
             while self._pool:
                 item = self._pool.popleft()

@@ -38,6 +38,7 @@ Usage::
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -128,13 +129,17 @@ class GraphQLRouter:
         operation_name = body.get("operationName")
 
         if not query:
-            return JSONResponse({"errors": [{"message": "No query provided"}]}, status_code=400)
+            return JSONResponse({"errors": [{"message": "No query provided"}]}, status=400)
 
         # Build context
         context = {}
         if self._context_factory:
             if callable(self._context_factory):
-                context = await self._context_factory(req) if callable(self._context_factory) else {}
+                result = self._context_factory(req)
+                if inspect.isawaitable(result):
+                    context = await result
+                else:
+                    context = result
         context["request"] = req
 
         try:
@@ -158,7 +163,7 @@ class GraphQLRouter:
             logger.exception("GraphQL execution error")
             return JSONResponse(
                 {"errors": [{"message": f"Internal error: {str(e)}"}]},
-                status_code=500,
+                status=500,
             )
 
     def _get_graphiql_html(self, path: str) -> str:

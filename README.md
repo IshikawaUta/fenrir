@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-874%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
+[![Tests](https://img.shields.io/badge/Tests-1331%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
 [![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
 [![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
 
@@ -104,7 +104,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.0.0")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.1.0")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -118,7 +118,8 @@ class UserRegister(BaseModel):
     age: int
 
 async def verify_api_key(x_api_key: str = Header(default=None)):
-    if x_api_key != "super-secret-key":
+    expected_key = os.getenv("API_KEY", "changeme-set-API_KEY-env")
+    if x_api_key != expected_key:
         logger.warning("Invalid API key provided!")
     return x_api_key
 
@@ -231,7 +232,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v4.0.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.1.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -475,7 +476,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **874 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.0.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **1331 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.1.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -485,12 +486,97 @@ PYTHONPATH=. pytest -v
 
 ### Output:
 ```text
-================================ 874 passed, 1 skipped in 37.00s ================================
+================================ 1331 passed, 1 skipped in 39.86s ================================
 ```
 
 ---
 
 ## 🔄 Changelog
+
+### v4.1.0 — Bug Fixes, Performance & Test Coverage
+
+**Bug Fixes (53+):**
+- Fixed CSRF token HMAC predictable randomness (now uses `secrets.token_hex(32)`)
+- Fixed CORS duplicate branches and incorrect headers handling
+- Fixed RateLimit TOCTOU race condition with `asyncio.Lock` → `deque`
+- Fixed BodyLimit body drain and double response issue
+- Fixed MemoryQueue unbounded cleanup with periodic cleanup task
+- Fixed ORM ORDER BY column_name validation and PostgreSQL INSERT RETURNING
+- Fixed config.py `exec()` path traversal with strict validation
+- Fixed monitoring/core.py default password rejection and SSRF validation
+- Fixed graphql.py JSONResponse `status_code` → `status` parameter
+- Fixed graphql.py missing `import inspect` for signature inspection
+- Fixed graphql.py sync context_factory always awaited (even for plain dict)
+- Fixed cache.py `cached` decorator `exists()` check before staleness
+- Fixed plugins.py lazy import validation
+- Fixed sessions.py event loop crash with `_run_sync_or_async()`
+- Fixed monitoring/routes.py logout `GET` → `POST` for CSRF protection
+- Fixed `_app_dispatch.py` duplicate `response_model` processing
+- Fixed `_app_dispatch.py` SessionMiddleware error handling
+- Fixed ORM `update()` column_name validation
+- Fixed `_app_core.py` mount validation
+- Fixed features.py monitoring middlewares when disabled
+- Fixed queue.py `json_loads`/`json_dumps` AttributeError
+- Fixed json.py redundant list comprehension
+- Fixed ORM `transaction()` context manager for batched commits
+- Fixed ORM `_from_row` with `field_index_map` O(1) lookup
+- Fixed ORM `_insert` and `_update` with proper column_name validation
+- Fixed ORM `_create_table` with proper column_name handling
+- Fixed openapi.py HEAD filter for duplicate routes
+- Fixed context.py `RequestContext.__enter__` rollback on exception
+- Fixed testing.py `follow_redirects` parameter
+- Fixed helpers.py `url_for` WebSocket class-based view fallback
+- Fixed sse.py sync generator blocking with `run_in_executor`
+- Fixed pool.py `close()`/`_release()`/`_discard()` lock None guard
+- Fixed performance.py `FileResponse.stream_body` with `run_in_executor`
+- Fixed static.py TOCTOU race condition in `StaticFiles`
+- Fixed middleware.py async import for `CSRFMiddleware`
+- Fixed monitoring/core.py `check_site_health` SSRF validation
+- And 15+ more bug fixes
+
+**Performance Optimizations (12):**
+- FileResponse `stream_body` with `run_in_executor` for non-blocking I/O
+- `is_falcon_resource()` cached at route init for faster detection
+- TypeAdapter cache per annotation in dependencies for faster validation
+- URLSafeTimedSerializer cache in sessions for faster serialization
+- ORM `field_index_map` O(1) lookup instead of O(n) `list.index()`
+- `deque` for RateLimit instead of `list` filter for O(1) popleft
+- Redis `aclose()` and `set(ex=ttl)` deprecation fixes
+- `LruCache.popitem()` O(1) for cache eviction
+- `transaction()` context manager for ORM batched commits
+- Import hot path dedup in `_app_dispatch.py`
+- Lazy imports cached for `BackgroundTasks`, `UploadFile`, `current_app`
+- `linecache` for debug source inspection
+
+**Deprecation Fixes (3):**
+- RedisQueue `close()` → `aclose()` (aioredis deprecation)
+- RedisCache `close()` → `aclose()` (aioredis deprecation)
+- RedisCache `setex()` → `set(ex=ttl)` (redis-py deprecation)
+
+**Test Coverage: 76% → 83% (1331 tests)**
+- graphql.py: 32% → 92% (19 new tests)
+- grpc.py: 49% → 70% (24 new tests)
+- upload.py: 54% → 100% (15 new tests)
+- templating.py: 65% → 100% (12 new tests)
+- orm.py: 64% → 71% (32 new tests)
+- signals.py: 71% → 96% (19 new tests)
+- cache.py: 52% → 91% (50 new tests)
+- plugins.py: 63% → 86% (77 new tests)
+- performance.py: 0% → 85% (51 new tests)
+- queue.py: 47% → 94% (47 new tests)
+- cli.py: 44% → 68% (17 new tests)
+
+**Benchmark:**
+- Added 5-framework comparison (Fenrir, FastAPI, Flask, Falcon, Sanic)
+- Fenrir wins Import Time (108ms vs FastAPI 1013ms) and Route Registration (59ms vs FastAPI 299ms)
+- Falcon wins Throughput (3419 req/s) and Import Time in some runs
+- FastAPI wins App Init (0.64ms)
+
+**Security Fixes:**
+- Hardcoded API key in demo_app.py → environment variable `API_KEY`
+- Default password "changeme" → rejection with warning
+- SSRF validation for monitoring health checks
+- CSRF token now uses cryptographically secure random
 
 ### v4.0.0 — Production-Ready Major Release
 

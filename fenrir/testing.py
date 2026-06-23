@@ -4,9 +4,13 @@ from typing import Any
 class FenrirTestClient:
     __test__ = False
 
-    def __init__(self, app: Any):
+    def __init__(self, app: Any, follow_redirects: bool = False):
         self.app = app
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            follow_redirects=follow_redirects,
+        )
 
     async def __aenter__(self) -> "FenrirTestClient":
         await self.client.__aenter__()

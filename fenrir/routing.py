@@ -222,6 +222,14 @@ class Route:
         self.name = name or getattr(handler, "__name__", None)
         # Multiple response models: {status_code: model_class}
         self.response_models = response_models or {}
+        # Cache Falcon resource detection
+        self._is_falcon = False
+        self._falcon_methods: Dict[str, Callable] = {}
+        if handler is not None:
+            for attr in dir(handler):
+                if attr.startswith("on_") and callable(getattr(handler, attr)):
+                    self._is_falcon = True
+                    self._falcon_methods[attr] = getattr(handler, attr)
         # WebSocket per-route timeout (seconds)
         self.ws_timeout = ws_timeout
 
@@ -241,17 +249,11 @@ class Route:
 
     def is_falcon_resource(self) -> bool:
         """Check if the handler behaves like a Falcon resource class."""
-        # Falcon resources have methods like on_get, on_post, etc.
-        for attr in dir(self.handler):
-            if attr.startswith("on_") and callable(getattr(self.handler, attr)):
-                return True
-        return False
+        return self._is_falcon
 
     def get_resource_method(self, method: str) -> Optional[Callable]:
         target_name = f"on_{method.lower()}"
-        if hasattr(self.handler, target_name):
-            return getattr(self.handler, target_name)
-        return None
+        return self._falcon_methods.get(target_name)
 
 
 class Router:

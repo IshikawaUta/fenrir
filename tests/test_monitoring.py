@@ -185,7 +185,8 @@ class TestHealthCheck:
         result = check_site_health("http://localhost:99999")
         assert isinstance(result, dict)
         assert result["url"] == "http://localhost:99999"
-        assert result["status"] in ("healthy", "degraded", "down", "unknown")
+        # SSRF protection blocks localhost, so status is "error"
+        assert result["status"] in ("healthy", "degraded", "down", "unknown", "error")
 
     def test_check_health_records_result(self):
         check_site_health("http://localhost:99999")
@@ -590,7 +591,7 @@ class TestMonitoringRoutes:
             init_monitoring(app)
 
         client = app.test_client()
-        resp = await client.get("/monitoring/logout")
+        resp = await client.post("/monitoring/logout")
         assert resp.status_code in (302, 307)
         assert "/monitoring/login" in resp.headers.get("location", "")
 

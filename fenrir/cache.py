@@ -75,9 +75,8 @@ class CacheBackend:
     async def get_many(self, keys: list) -> dict:
         result = {}
         for key in keys:
-            value = await self.get(key)
-            if value is not None:
-                result[key] = value
+            if await self.exists(key):
+                result[key] = await self.get(key)
         return result
 
     async def set_many(self, mapping: dict, ttl: Optional[int] = None) -> None:
@@ -122,18 +121,9 @@ class MemoryCache(CacheBackend):
             self._cache.move_to_end(key)
         self._cache[key] = (value, expires_at)
 
-        # Evict expired entries first, then LRU
+        # Evict LRU when over capacity — O(1) instead of O(n) expired scan
         while len(self._cache) > self._max_size:
-            # Try to evict expired entries first
-            evicted = False
-            now = time.time()
-            for k, (_, exp) in self._cache.items():
-                if exp is not None and now >= exp:
-                    del self._cache[k]
-                    evicted = True
-                    break
-            if not evicted:
-                self._cache.popitem(last=False)
+            self._cache.popitem(last=False)
 
     async def delete(self, key: str) -> bool:
         if key in self._cache:
@@ -240,7 +230,7 @@ class RedisCache(CacheBackend):
         redis = await self._get_redis()
         data = self._serializer(value)
         if ttl is not None and ttl > 0:
-            await redis.setex(self._make_key(key), ttl, data)
+            await redis.set(self._make_key(key), data, ex=ttl)
         else:
             await redis.set(self._make_key(key), data)
 
@@ -274,6 +264,9 @@ class RedisCache(CacheBackend):
         for key, value in zip(keys, values):
             if value is not None:
                 result[key] = self._deserializer(value)
+            elif await redis.exists(self._make_key(key)):
+                # Value is None but key exists
+                result[key] = None
         return result
 
     async def set_many(self, mapping: dict, ttl: Optional[int] = None) -> None:
@@ -284,14 +277,14 @@ class RedisCache(CacheBackend):
         for key, value in mapping.items():
             data = self._serializer(value)
             if ttl is not None and ttl > 0:
-                pipe.setex(self._make_key(key), ttl, data)
+                pipe.set(self._make_key(key), data, ex=ttl)
             else:
                 pipe.set(self._make_key(key), data)
         await pipe.execute()
 
     async def close(self) -> None:
         if self._redis is not None:
-            await self._redis.close()
+            await self._redis.aclose()
             self._redis = None
 
     async def __aenter__(self) -> "RedisCache":
@@ -459,9 +452,8 @@ class Cache:
                     key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
                     cache_key = ":".join(key_parts)
 
-                cached_value = await self.get(cache_key)
-                if cached_value is not None:
-                    return cached_value
+                if await self.exists(cache_key):
+                    return await self.get(cache_key)
 
                 result = await func(*args, **kwargs) if asyncio.iscoroutinefunction(func) else func(*args, **kwargs)
                 await self.set(cache_key, result, ttl=ttl)

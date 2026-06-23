@@ -152,6 +152,8 @@ class MemoryQueue(QueueBackend):
         self._jobs: Dict[str, Job] = {}
         self._processing: Set[str] = set()
         self._max_size = max_size
+        self._cleanup_entries: List[tuple] = []  # (timestamp, job_id)
+        self._cleanup_task: Optional[asyncio.Task] = None
 
     async def enqueue(self, job: Job) -> None:
         self._jobs[job.id] = job
@@ -198,12 +200,29 @@ class MemoryQueue(QueueBackend):
         # Clean up completed/failed/cancelled jobs to prevent memory leak
         if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
             self._processing.discard(job.id)
-            # Remove from _jobs after a short delay to allow get_job calls
-            # to still retrieve the final status
-            async def _cleanup():
-                await asyncio.sleep(60)  # Keep for 1 minute for status queries
-                self._jobs.pop(job.id, None)
-            asyncio.create_task(_cleanup())
+            # Mark for cleanup after 60 seconds
+            import time as _time
+            self._cleanup_entries.append((_time.time() + 60, job.id))
+            # Start single cleanup task if not running
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = asyncio.create_task(self._run_cleanup())
+
+    async def _run_cleanup(self) -> None:
+        """Single background task that processes all cleanup entries."""
+        import time as _time
+        while self._cleanup_entries:
+            now = _time.time()
+            # Find entries ready for cleanup
+            ready = [i for i, (ts, _) in enumerate(self._cleanup_entries) if ts <= now]
+            for i in reversed(ready):
+                _, job_id = self._cleanup_entries.pop(i)
+                self._jobs.pop(job_id, None)
+            if self._cleanup_entries:
+                # Sleep until next entry is ready
+                earliest = min(ts for ts, _ in self._cleanup_entries)
+                await asyncio.sleep(max(0, earliest - _time.time()))
+            else:
+                break
 
     async def remove_job(self, job_id: str) -> bool:
         if job_id in self._jobs:
@@ -266,10 +285,10 @@ class RedisQueue(QueueBackend):
         job_id = result[0][0]
         data = await redis.hget(self._key("jobs"), job_id)
         if data:
-            job = Job.from_dict(self.json_loads(data))
+            job = Job.from_dict(json_loads(data))
             job.status = JobStatus.RUNNING
             job.started_at = time.time()
-            await redis.hset(self._key("jobs"), job.id, self.json_dumps(job.to_dict()))
+            await redis.hset(self._key("jobs"), job.id, json_dumps(job.to_dict()))
             return job
         # Job data missing — clean up
         await redis.zrem(self._key("pending"), job_id)
@@ -279,7 +298,7 @@ class RedisQueue(QueueBackend):
         """Re-enqueue a job for retry."""
         redis = await self._get_redis()
         job.status = JobStatus.PENDING
-        data = self.json_dumps(job.to_dict())
+        data = json_dumps(job.to_dict())
         await redis.hset(self._key("jobs"), job.id, data)
         if job.delay > 0:
             schedule_time = time.time() + job.delay
@@ -295,12 +314,12 @@ class RedisQueue(QueueBackend):
         redis = await self._get_redis()
         data = await redis.hget(self._key("jobs"), job_id)
         if data:
-            return Job.from_dict(self.json_loads(data))
+            return Job.from_dict(json_loads(data))
         return None
 
     async def update_job(self, job: Job) -> None:
         redis = await self._get_redis()
-        await redis.hset(self._key("jobs"), job.id, self.json_dumps(job.to_dict()))
+        await redis.hset(self._key("jobs"), job.id, json_dumps(job.to_dict()))
 
     async def remove_job(self, job_id: str) -> bool:
         redis = await self._get_redis()
@@ -314,14 +333,14 @@ class RedisQueue(QueueBackend):
         all_data = await redis.hgetall(self._key("jobs"))
         result = []
         for data in all_data.values():
-            job = Job.from_dict(self.json_loads(data))
+            job = Job.from_dict(json_loads(data))
             if job.status == status:
                 result.append(job)
         return result
 
     async def close(self) -> None:
         if self._redis is not None:
-            await self._redis.close()
+            await self._redis.aclose()
             self._redis = None
 
     async def __aenter__(self) -> "RedisQueue":

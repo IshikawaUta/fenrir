@@ -86,6 +86,8 @@ def url_for(endpoint: str, **values: Any) -> str:
             bp_name = bp.name if bp else None
             if bp_name == target_bp:
                 handler_name = getattr(route.handler, "__name__", None)
+                if not handler_name and hasattr(route.handler, "__class__"):
+                    handler_name = route.handler.__class__.__name__
                 if handler_name == target_handler:
                     matched_route = route
                     break

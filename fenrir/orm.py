@@ -42,6 +42,7 @@ import json
 import logging
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import (
     Any,
@@ -300,21 +301,27 @@ class QuerySet:
 
     def filter(self, **kwargs: Any) -> "QuerySet":
         qs = self._clone()
+        valid_fields = set(self.model_class._meta["fields"].keys())
         for key, value in kwargs.items():
             if "__" in key:
                 field_name, op = key.rsplit("__", 1)
             else:
                 field_name, op = key, "eq"
+            if field_name not in valid_fields:
+                raise ValueError(f"Invalid filter field: {field_name}")
             qs._filters.append((field_name, op, value))
         return qs
 
     def exclude(self, **kwargs: Any) -> "QuerySet":
         qs = self._clone()
+        valid_fields = set(self.model_class._meta["fields"].keys())
         for key, value in kwargs.items():
             if "__" in key:
                 field_name, op = key.rsplit("__", 1)
             else:
                 field_name, op = key, "eq"
+            if field_name not in valid_fields:
+                raise ValueError(f"Invalid filter field: {field_name}")
             # Invert the operator
             op = _OPERATOR_INVERT.get(op, f"not_{op}")
             qs._filters.append((field_name, op, value))
@@ -427,10 +434,13 @@ class QuerySet:
             else:
                 fname = field
             if fname in valid_fields:
+                # Use column_name if available, otherwise use field name
+                field_obj = self.model_class._meta["fields"].get(fname)
+                col_name = getattr(field_obj, "column_name", None) or fname
                 if field.startswith("-"):
-                    parts.append(f"{fname} DESC")
+                    parts.append(f"{col_name} DESC")
                 else:
-                    parts.append(f"{fname} ASC")
+                    parts.append(f"{col_name} ASC")
         if not parts:
             return ""
         return " ORDER BY " + ", ".join(parts)
@@ -502,9 +512,10 @@ class QuerySet:
             if field_name not in valid_fields:
                 raise ValueError(f"Invalid field name: {field_name}")
             field_obj = self.model_class._meta["fields"].get(field_name)
+            col_name = getattr(field_obj, "column_name", None) or field_name if field_obj else field_name
             if field_obj:
                 value = field_obj.to_db(value)
-            set_parts.append(f"{field_name} = ?")
+            set_parts.append(f"{col_name} = ?")
             set_values.append(value)
         sql = f"UPDATE {table} SET {', '.join(set_parts)}{where}"
         result = await self.db.execute(sql, set_values + params)
@@ -554,6 +565,7 @@ class ModelMeta(type):
             "tablename": tablename,
             "fields": fields_dict,
             "primary_key": primary_key,
+            "field_index_map": {fname: idx for idx, fname in enumerate(fields_dict.keys())},
         }
 
         namespace["_meta"] = meta
@@ -605,15 +617,15 @@ class Model(metaclass=ModelMeta):
     def _from_row(cls, row: Any) -> "Model":
         """Create a model instance from a database row."""
         data = {}
+        field_index = cls._meta["field_index_map"]
         for fname, field in cls._meta["fields"].items():
             if isinstance(row, dict):
                 raw = row.get(fname)
             elif hasattr(row, fname):
                 raw = getattr(row, fname, None)
-            elif isinstance(row, (tuple, list)) and fname in cls._meta["fields"]:
-                # Try by index
-                idx = list(cls._meta["fields"].keys()).index(fname)
-                raw = row[idx] if idx < len(row) else None
+            elif isinstance(row, (tuple, list)):
+                idx = field_index.get(fname)
+                raw = row[idx] if idx is not None and idx < len(row) else None
             else:
                 raw = None
             data[fname] = field.to_python(raw)
@@ -656,31 +668,39 @@ class Model(metaclass=ModelMeta):
             if hasattr(field, "auto_now_add") and field.auto_now_add and value is None:
                 value = datetime.now(timezone.utc)
                 setattr(self, fname, value)
-            fields_list.append(fname)
+            col_name = getattr(field, "column_name", None) or fname
+            fields_list.append(col_name)
             values.append(field.to_db(value))
             placeholders.append("?")
 
         table = meta["tablename"]
-        sql = f"INSERT INTO {table} ({', '.join(fields_list)}) VALUES ({', '.join(placeholders)})"
-        cursor = await self._db.execute(sql, values)
+        # Use RETURNING clause for PostgreSQL to avoid race condition
+        if self._db._dialect == "postgresql" and meta["primary_key"]:
+            pk_col = meta["primary_key"]
+            sql = f"INSERT INTO {table} ({', '.join(fields_list)}) VALUES ({', '.join(placeholders)}) RETURNING {pk_col}"
+            result = await self._db.fetch_one(sql, values)
+            if result and pk_col in result:
+                setattr(self, pk_col, result[pk_col])
+        else:
+            sql = f"INSERT INTO {table} ({', '.join(fields_list)}) VALUES ({', '.join(placeholders)})"
+            cursor = await self._db.execute(sql, values)
 
-        if meta["primary_key"] and getattr(self, meta["primary_key"]) is None:
-            if self._db._dialect == "sqlite":
-                setattr(self, meta["primary_key"], cursor)
-            else:
-                # PostgreSQL: fetch the inserted ID via RETURNING
-                pk_col = meta["primary_key"]
-                pk_val = getattr(self, meta["primary_key"])
-                if pk_val is None:
-                    # Try to get the last inserted row
-                    try:
-                        result = await self._db.fetch_one(
-                            f"SELECT {pk_col} FROM {table} ORDER BY {pk_col} DESC LIMIT 1"
-                        )
-                        if result:
-                            setattr(self, meta["primary_key"], result[pk_col])
-                    except Exception:
-                        pass
+            if meta["primary_key"] and getattr(self, meta["primary_key"]) is None:
+                if self._db._dialect == "sqlite":
+                    setattr(self, meta["primary_key"], cursor)
+                else:
+                    # Fallback for other databases
+                    pk_col = meta["primary_key"]
+                    pk_val = getattr(self, meta["primary_key"])
+                    if pk_val is None:
+                        try:
+                            result = await self._db.fetch_one(
+                                f"SELECT {pk_col} FROM {table} ORDER BY {pk_col} DESC LIMIT 1"
+                            )
+                            if result:
+                                setattr(self, meta["primary_key"], result[pk_col])
+                        except Exception:
+                            pass
 
     async def _update(self) -> None:
         meta = self._meta
@@ -697,7 +717,8 @@ class Model(metaclass=ModelMeta):
             if hasattr(field, "auto_now") and field.auto_now:
                 value = datetime.now(timezone.utc)
                 setattr(self, fname, value)
-            set_parts.append(f"{fname} = ?")
+            col_name = getattr(field, "column_name", None) or fname
+            set_parts.append(f"{col_name} = ?")
             set_values.append(field.to_db(value))
 
         table = meta["tablename"]
@@ -865,6 +886,16 @@ class Database:
         self._dialect = self._parse_dialect(url)
         self._models: List[type] = []
         self._connect_lock = asyncio.Lock()
+        self._in_transaction: bool = False
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for batching multiple statements in one transaction."""
+        self._in_transaction = True
+        try:
+            yield self
+        finally:
+            self._in_transaction = False
 
     def _parse_dialect(self, url: str) -> str:
         if url.startswith("sqlite"):
@@ -924,11 +955,13 @@ class Database:
             await self.connect()
         if self._dialect == "sqlite":
             cursor = await self._conn.execute(sql, params or [])
-            await self._conn.commit()
+            if not self._in_transaction:
+                await self._conn.commit()
             return cursor.lastrowid
         else:
             result = await self._conn.execute(sql, params or [])
-            await self._conn.commit()
+            if not self._in_transaction:
+                await self._conn.commit()
             return result
 
     async def fetch_one(self, sql: str, params: Optional[List[Any]] = None) -> Optional[Dict[str, Any]]:
@@ -991,7 +1024,8 @@ class Database:
 
         for fname, field in meta["fields"].items():
             col_type = field.get_column_type(self._dialect)
-            parts = [fname, col_type]
+            col_name = getattr(field, "column_name", None) or fname
+            parts = [col_name, col_type]
             if not field.null and not field.primary_key:
                 parts.append("NOT NULL")
             if field.unique and not field.primary_key:

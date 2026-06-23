@@ -347,11 +347,17 @@ class FileResponse(Response):
         self._body = b""
 
     async def stream_body(self) -> AsyncGenerator[bytes, None]:
-        """Yield file contents in chunks."""
+        """Yield file contents in chunks without blocking the event loop."""
+        import asyncio
         chunk_size = 64 * 1024  # 64 KB
+        loop = asyncio.get_event_loop()
+
+        def _read_chunk(f):
+            return f.read(chunk_size)
+
         with open(self._file_path, "rb") as f:
             while True:
-                chunk = f.read(chunk_size)
+                chunk = await loop.run_in_executor(None, _read_chunk, f)
                 if not chunk:
                     break
                 yield chunk

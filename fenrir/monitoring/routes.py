@@ -121,8 +121,24 @@ def register_monitoring_routes(app: Any):
         )
         return resp
 
-    @app.get(f"{prefix}/logout")
+    @app.post(f"{prefix}/logout")
     async def monitoring_logout():
+        from fenrir.context import request
+        token = request.cookies.get("monitoring_token")
+        if not _check_token(token):
+            return redirect(f"{prefix}/login")
+        
+        body = request.body
+        try:
+            body_str = body.decode("utf-8", errors="replace") if body else ""
+        except Exception:
+            body_str = ""
+        form_data = _parse_form(body_str)
+        csrf_form = form_data.get("csrf_token", "")
+        csrf_cookie = request.cookies.get("monitoring_csrf", "")
+        if not csrf_form or not csrf_cookie or not hmac.compare_digest(csrf_form, csrf_cookie):
+            return redirect(f"{prefix}/dashboard")
+        
         from fenrir.response import Response
         resp = Response(
             body="",
@@ -169,7 +185,7 @@ def register_monitoring_routes(app: Any):
         if not _check_token(token):
             return JSONResponse({"error": "unauthorized"}, status=401)
         sites = _monitoring_data.get("sites", [])
-        results = await asyncio.gather(*[check_site_health_async(site) for site in sites])
+        results = await asyncio.gather(*[check_site_health_async(site, sites) for site in sites])
         _save_data()
         return JSONResponse({"sites": list(results)})
 
@@ -217,7 +233,7 @@ def register_monitoring_routes(app: Any):
         if url not in allowed_sites:
             return JSONResponse({"error": "url not in monitored sites"}, status=403)
         
-        result = await check_site_health_async(url)
+        result = await check_site_health_async(url, allowed_sites)
         _save_data()
         return JSONResponse(result)
 
@@ -818,7 +834,10 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             <a href="/monitoring/dashboard">Dashboard</a>
             <a href="/monitoring/api/stats">Stats</a>
             <a href="/monitoring/api/summary">Summary</a>
-            <a href="/monitoring/logout">Logout</a>
+            <form method="POST" action="/monitoring/logout" style="display:inline">
+                <input type="hidden" name="csrf_token" id="csrf-token-logout" value="">
+                <button type="submit" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;margin-left:16px;text-decoration:underline;">Logout</button>
+            </form>
         </div>
     </nav>
 
@@ -893,6 +912,16 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             if (!str) return '';
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }}
+
+        function getCookie(name) {{
+            const value = `; ${{document.cookie}}`;
+            const parts = value.split(`; ${{name}}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return '';
+        }}
+
+        // Set CSRF token for logout form
+        document.getElementById('csrf-token-logout').value = getCookie('monitoring_csrf');
 
         async function refreshHealth() {{
             const grid = document.getElementById('health-grid');

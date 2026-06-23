@@ -98,6 +98,8 @@ _LAZY_IMPORTS = {
     "RateLimitMiddleware": ("fenrir.middleware", "RateLimitMiddleware"),
     "BodyLimitMiddleware": ("fenrir.middleware", "BodyLimitMiddleware"),
     "CSRFMiddleware": ("fenrir.middleware", "CSRFMiddleware"),
+    # Static files
+    "StaticFiles": ("fenrir.static", "StaticFiles"),
     # Connection Pooling
     "ConnectionPool": ("fenrir.pool", "ConnectionPool"),
     "DatabasePool": ("fenrir.pool", "DatabasePool"),
@@ -163,7 +165,7 @@ _SUBMODULE_IMPORTS = {
     "performance": "fenrir.performance",
 }
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
 
 
 def __getattr__(name: str):
@@ -287,6 +289,8 @@ __all__ = [
     "RateLimitMiddleware",
     "BodyLimitMiddleware",
     "CSRFMiddleware",
+    # Static files
+    "StaticFiles",
     # Pagination
     "PaginationParams",
     "paginate",

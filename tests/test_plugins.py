@@ -373,3 +373,110 @@ class TestExceptions:
     def test_version_error(self):
         with pytest.raises(PluginVersionError):
             raise PluginVersionError("test")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Extended PluginRegistry Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestPluginRegistryExtended:
+    def test_disable_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        result = registry.disable("nonexistent")
+        assert result is True  # disable returns True for nonexistent (idempotent)
+
+    def test_get_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        plugin = registry.get("nonexistent")
+        assert plugin is None
+
+    def test_is_enabled_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        assert registry.is_enabled("nonexistent") is False
+
+    def test_reload_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        result = registry.reload("nonexistent")
+        assert result is True  # reload returns True for nonexistent (no-op)
+
+    def test_get_plugin_config_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        config = registry.get_plugin_config("nonexistent")
+        assert config == {}
+
+    def test_enable_disable_enable(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        registry.register(SimplePlugin)
+        registry.enable("simple")
+        registry.disable("simple")
+        registry.enable("simple")
+        assert registry.is_enabled("simple")
+
+    def test_register_duplicate(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        registry.register(SimplePlugin)
+        registry.register(SimplePlugin)  # Should not raise
+        assert "simple" in registry._registry
+
+    def test_cleanup_empty(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        registry.cleanup()  # Should not raise
+
+    def test_health_check_disabled(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        registry.register(SimplePlugin)
+        # Don't enable - health check should handle gracefully
+        health = registry.check_health(force=True)
+        assert "simple" not in health or health.get("simple") is None
+
+    def test_get_dependencies_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        deps = registry.get_dependencies("nonexistent")
+        assert deps == []
+
+    def test_get_dependents_nonexistent(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        dependents = registry.get_dependents("nonexistent")
+        assert dependents == []
+
+    def test_list_plugins_empty(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        plugins = registry.list_plugins()
+        assert plugins == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Plugin with version check
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestVersionCheck:
+    def test_version_check_fails(self):
+        app = MockApp()
+        registry = PluginRegistry(app)
+        registry.register(VersionPlugin)
+        result = registry.enable("versioned")
+        assert result is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# setup_plugins function
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSetupPlugins:
+    def test_setup_plugins(self):
+        app = MockApp()
+        app.config["PLUGINS"] = []
+        setup_plugins(app)
+        # Should not raise even with no plugins configured

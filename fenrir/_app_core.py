@@ -80,7 +80,7 @@ class FenrirCoreMixin:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "4.0.0",
+        version: str = "4.1.0",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",
@@ -159,6 +159,7 @@ class FenrirCoreMixin:
         self._asgi_middlewares: List = []
         self._asgi_app: Any = None
         self._wsgi_mounts: List = []
+        self._asgi_mounts: List = []
         self.listeners: Dict[str, List[Callable]] = {
             "before_server_start": [],
             "after_server_start": [],
@@ -244,6 +245,24 @@ class FenrirCoreMixin:
         prefix = path.rstrip("/")
         self._wsgi_mounts.append((prefix, adapter))
 
+    def mount(self, path: str, app: Any) -> None:
+        """Mount an ASGI sub-application at the given path prefix.
+
+        The sub-application receives requests with the path prefix stripped.
+        This works with ``StaticFiles``, sub-Fenrir apps, or any ASGI app.
+
+        Usage::
+
+            app.mount("/static", StaticFiles(directory="static"))
+            app.mount("/api/v2", other_fenrir_app)
+        """
+        if not path or not path.startswith("/"):
+            raise ValueError(f"Mount path must start with /: {path}")
+        if not callable(app):
+            raise ValueError(f"Mounted app must be callable: {app}")
+        prefix = path.rstrip("/")
+        self._asgi_mounts.append((prefix, app))
+
     def middleware(self, middleware_type: str = "request"):
         def decorator(func):
             if middleware_type in ("request", "response"):
@@ -263,7 +282,7 @@ class FenrirCoreMixin:
 
     def register_blueprint(self, blueprint: Blueprint):
         self.blueprints.append(blueprint)
-        self.teardown_request_funcs[blueprint.name] = blueprint.teardown_request_funcs
+        self.teardown_request_funcs[blueprint.name] = list(blueprint.teardown_request_funcs)
         for path, handler, methods in blueprint.routes:
             full_path = blueprint.url_prefix + path
             self.router.add_route(full_path, handler, methods)
