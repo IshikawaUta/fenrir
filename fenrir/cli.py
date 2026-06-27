@@ -174,6 +174,11 @@ def cmd_run(args):
             disable_dashboard=args.disable_dashboard,
         )
         arbiter.start()
+    except ImportError:
+        print("\033[91mError: asteri is required for production mode.\033[0m")
+        print("Install with: pip install asteri")
+        print("Or use --dev mode: fenrir run app:app --dev")
+        sys.exit(1)
     except KeyboardInterrupt:
         pass
 
@@ -719,6 +724,7 @@ if __name__ == "__main__":
 
 def _update_env_var(key: str, value: str):
     """Update or add a variable in the .env file."""
+    import tempfile
     env_file = os.path.join(os.getcwd(), ".env")
     lines = []
     found = False
@@ -736,8 +742,12 @@ def _update_env_var(key: str, value: str):
     if not found:
         lines.append(f"{key}={value}\n")
     
-    with open(env_file, "w") as f:
-        f.writelines(lines)
+    # Atomic write: write to temp file, then rename
+    dir_name = os.path.dirname(env_file) or "."
+    with tempfile.NamedTemporaryFile(mode="w", dir=dir_name, delete=False) as tmp:
+        tmp.writelines(lines)
+        tmp_path = tmp.name
+    os.replace(tmp_path, env_file)
 
 
 def cmd_monitoring(args):

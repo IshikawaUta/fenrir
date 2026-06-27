@@ -11,6 +11,22 @@ _BackgroundTasks = None
 _UploadFile = None
 _current_app = None
 
+# Cache for dependency async status (avoids inspect.iscoroutinefunction on every call)
+_dep_is_async_cache: Dict[int, bool] = {}
+
+
+def _is_async_dep(dep_func):
+    """Check if a dependency function is async, with caching."""
+    dep_id = id(dep_func)
+    result = _dep_is_async_cache.get(dep_id)
+    if result is not None:
+        return result
+    result = inspect.iscoroutinefunction(dep_func) or (
+        hasattr(dep_func, "__call__") and inspect.iscoroutinefunction(dep_func.__call__)
+    )
+    _dep_is_async_cache[dep_id] = result
+    return result
+
 
 def _get_background_tasks_class():
     global _BackgroundTasks
@@ -267,7 +283,7 @@ async def resolve_parameters(
                             req_obj._yield_cleanups = []
                         req_obj._yield_cleanups.append(sync_cleanup)
                 else:
-                    is_coroutine_fn = inspect.iscoroutinefunction(dep_func) or (hasattr(dep_func, "__call__") and inspect.iscoroutinefunction(dep_func.__call__))
+                    is_coroutine_fn = _is_async_dep(dep_func)
                     if is_coroutine_fn:
                         dep_val = await cast(Any, dep_func(**dep_kwargs))
                     else:

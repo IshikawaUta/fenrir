@@ -150,8 +150,15 @@ class RedisSessionInterface(SessionInterface):
                     "function inside an async context. Use an async Redis "
                     "client (e.g., redis.asyncio) or make open_session/save_session async."
                 )
-            else:
+            elif loop:
                 return loop.run_until_complete(coro_or_value)
+            else:
+                # No running loop, create one
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(coro_or_value)
+                finally:
+                    loop.close()
         return coro_or_value
 
     def open_session(self, app: Any, request: Any) -> ServerSideSession:

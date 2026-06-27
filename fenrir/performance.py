@@ -145,14 +145,13 @@ class ResponseCache:
 
         # Evict expired entries first, then LRU
         while len(self._cache) > self._max_size:
-            evicted = False
             now = time.time()
-            for k, (_, exp) in self._cache.items():
-                if exp <= now:
-                    del self._cache[k]
-                    evicted = True
-                    break
-            if not evicted:
+            # Collect expired keys first to avoid dict mutation during iteration
+            expired_keys = [k for k, (_, exp) in self._cache.items() if exp <= now]
+            if expired_keys:
+                for k in expired_keys:
+                    self._cache.pop(k, None)
+            else:
                 self._cache.popitem(last=False)
 
     def invalidate(self, key: str) -> bool:
@@ -359,8 +358,8 @@ def optimize_app(app: Any, **kwargs: Any) -> None:
             if cached:
                 from fenrir.response import Response
                 status, headers, body = cached
-                # Set cached response on request — handler should check for this
-                req._cached_response = Response(
+                # Return cached response directly
+                return Response(
                     body=body,
                     status=status,
                     headers=dict(headers) if headers else {},

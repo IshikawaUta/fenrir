@@ -10,11 +10,15 @@ from typing import Any, Callable, Dict
 from fenrir.compat import to_thread
 from fenrir.request import Request
 from fenrir.response import Response, JSONResponse, HTMLResponse
-from fenrir.context import _request_ctx_var, _g_ctx_var, _app_ctx_var, G
+from fenrir.context import _request_ctx_var, _g_ctx_var, _app_ctx_var, G, RequestContext
 from fenrir.dependencies import resolve_parameters, _get_cached_signature
 from fenrir.exceptions import HTTPException
+from fenrir.signals import request_started, request_finished, got_request_exception
 
 logger = logging.getLogger("fenrir")
+
+# Cache for listener async status (avoids inspect.iscoroutinefunction on every event)
+_listener_is_async_cache: dict = {}
 
 _STATUS_TEXTS = {
     400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
@@ -54,9 +58,12 @@ class FenrirDispatchMixin:
                 raise
 
     async def _dispatch(self, scope: Dict[str, Any], receive: Callable, send: Callable):
+        # Note: _active_app and _app_ctx_var are already set in __call__
+        # Only set if called directly (e.g., from test client without middleware)
         import fenrir.app as _app_mod
-        _app_mod._active_app = self
-        _app_ctx_var.set(self)
+        if _app_mod._active_app is not self:
+            _app_mod._active_app = self
+            _app_ctx_var.set(self)
 
         scope_type = scope.get("type")
 
@@ -123,16 +130,17 @@ class FenrirDispatchMixin:
                 logger.warning("Failed to open session: %s", e)
                 req.session = None
 
-        from fenrir.signals import request_started, request_finished, got_request_exception
         request_started.send(self)
 
-        from fenrir.context import RequestContext
         ctx = RequestContext(self, req)
         response_obj = None
 
         with ctx:
             try:
-                _ = req.host
+                # Validate host header early if TRUSTED_HOSTS is configured
+                if self.config.get("TRUSTED_HOSTS"):
+                    _ = req.host  # triggers host validation
+
                 route, path_params, handler_func = self.router.match(req.path, req.method)
                 req.path_params = path_params
 
@@ -230,6 +238,8 @@ class FenrirDispatchMixin:
                     logger.error("Error in dependency cleanup", exc_info=cleanup_err)
 
         # Send HTTP response
+        if response_obj is None:
+            response_obj = Response(status=500, content=b"Internal Server Error")
         await self._send_http_response(scope, response_obj, receive, send)
 
         # Background tasks
@@ -310,7 +320,12 @@ class FenrirDispatchMixin:
             except (ValueError, TypeError):
                 pass
 
-        if inspect.iscoroutinefunction(func):
+        # Use cached _is_async for Route objects, fallback to inspect for others
+        is_async = getattr(func, "_is_async", None)
+        if is_async is None:
+            is_async = inspect.iscoroutinefunction(func)
+
+        if is_async:
             return await func(*args, **kwargs)
         else:
             return await to_thread(func, *args, **kwargs)
@@ -869,7 +884,13 @@ function expandAll() {{
 
     async def _trigger_listeners(self, event: str):
         for listener in self.listeners.get(event, []):
-            if inspect.iscoroutinefunction(listener):
+            # Use cached async status
+            listener_id = id(listener)
+            is_async = _listener_is_async_cache.get(listener_id)
+            if is_async is None:
+                is_async = inspect.iscoroutinefunction(listener)
+                _listener_is_async_cache[listener_id] = is_async
+            if is_async:
                 await listener(self)
             else:
                 await to_thread(listener, self)

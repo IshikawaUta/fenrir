@@ -139,8 +139,8 @@ def send_file(
 
 
 def send_from_directory(directory: str, path: str, **kwargs: Any) -> Response:
-    directory = os.path.abspath(directory)
-    filepath = os.path.abspath(os.path.join(directory, path))
+    directory = os.path.realpath(directory)
+    filepath = os.path.realpath(os.path.join(directory, path))
     if not filepath.startswith(directory):
         raise HTTPNotFound(detail="File not found or access denied")
     return send_file(filepath, **kwargs)

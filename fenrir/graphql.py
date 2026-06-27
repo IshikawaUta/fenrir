@@ -96,6 +96,41 @@ class GraphQLRouter:
         self._max_depth = max_depth
         self._context_factory = context_factory
 
+    @staticmethod
+    def _query_depth(query: str) -> int:
+        """Calculate the maximum depth of a GraphQL query."""
+        depth = 0
+        max_d = 0
+        i = 0
+        length = len(query)
+        in_string = False
+        escape = False
+        while i < length:
+            c = query[i]
+            if escape:
+                escape = False
+                i += 1
+                continue
+            if c == '\\' and in_string:
+                escape = True
+                i += 1
+                continue
+            if c == '"':
+                in_string = not in_string
+                i += 1
+                continue
+            if in_string:
+                i += 1
+                continue
+            if c == '{':
+                depth += 1
+                if depth > max_d:
+                    max_d = depth
+            elif c == '}':
+                depth -= 1
+            i += 1
+        return max_d
+
     def mount(self, app: Any, path: Optional[str] = None) -> None:
         """Mount the GraphQL endpoint on the Fenrir app."""
         route_path = path or self._path
@@ -131,6 +166,23 @@ class GraphQLRouter:
         if not query:
             return JSONResponse({"errors": [{"message": "No query provided"}]}, status=400)
 
+        # Enforce introspection
+        if not self._introspection:
+            query_lower = query.lower()
+            if "introspectionquery" in query_lower or "__schema" in query_lower or "__type" in query_lower:
+                return JSONResponse(
+                    {"errors": [{"message": "Introspection is disabled"}]},
+                    status=403,
+                )
+
+        # Enforce max_depth
+        depth = self._query_depth(query)
+        if depth > self._max_depth:
+            return JSONResponse(
+                {"errors": [{"message": f"Query depth {depth} exceeds maximum allowed depth {self._max_depth}"}]},
+                status=400,
+            )
+
         # Build context
         context = {}
         if self._context_factory:
@@ -140,6 +192,8 @@ class GraphQLRouter:
                     context = await result
                 else:
                     context = result
+        if not isinstance(context, dict):
+            context = {"context": context}
         context["request"] = req
 
         try:

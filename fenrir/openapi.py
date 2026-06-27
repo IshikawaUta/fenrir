@@ -17,7 +17,50 @@ def _annotation_to_schema(annotation: Any) -> Dict:
         return {"type": "boolean"}
     if annotation is bytes:
         return {"type": "string", "format": "binary"}
+    if annotation is str:
+        return {"type": "string"}
+
+    # Handle complex types (List, Optional, Union, etc.)
+    origin = get_origin(annotation)
+    if origin is not None:
+        args = get_args(annotation)
+
+        # List[T] → array
+        if origin is list or (hasattr(origin, '__name__') and origin.__name__ == 'list'):
+            item_schema = _annotation_to_schema(args[0]) if args else {"type": "string"}
+            return {"type": "array", "items": item_schema}
+
+        # Dict[K, V] → object
+        if origin is dict or (hasattr(origin, '__name__') and origin.__name__ == 'dict'):
+            return {"type": "object"}
+
+        # Optional[T] → T with nullable
+        # Union[T, None] → T with nullable
+        from typing import Union, Optional
+        if origin is Union:
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                schema = _annotation_to_schema(non_none[0])
+                schema["nullable"] = True
+                return schema
+            # Multiple non-None types → oneOf
+            return {"oneOf": [_annotation_to_schema(a) for a in non_none]}
+
+    # Fallback
     return {"type": "string"}
+
+
+def _fix_refs(obj: Any) -> Any:
+    """Recursively replace $ref: '#/$defs/...' → '#/components/schemas/...'."""
+    if isinstance(obj, dict):
+        if "$ref" in obj and isinstance(obj["$ref"], str) and obj["$ref"].startswith("#/$defs/"):
+            obj["$ref"] = obj["$ref"].replace("#/$defs/", "#/components/schemas/", 1)
+        for v in obj.values():
+            _fix_refs(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _fix_refs(item)
+    return obj
 
 
 def _path_to_openapi(path_pattern: str) -> str:
@@ -133,6 +176,7 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
                                     for def_name, def_schema in model_schema["$defs"].items():
                                         schemas[def_name] = def_schema
                                     del model_schema["$defs"]
+                                _fix_refs(model_schema)
                                 schemas[model_name] = model_schema
                                 body_schema: Dict = {"$ref": f"#/components/schemas/{model_name}"}
                             except Exception:
@@ -203,6 +247,7 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
                             for d_name, d_schema in rm_schema["$defs"].items():
                                 schemas[d_name] = d_schema
                             del rm_schema["$defs"]
+                        _fix_refs(rm_schema)
                         schemas[rm_name] = rm_schema
                         success_resp_schema: Dict = {"$ref": f"#/components/schemas/{rm_name}"}
                     else:

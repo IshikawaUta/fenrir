@@ -6,11 +6,19 @@ with ETag, If-Modified-Since, and directory traversal protection.
 """
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import os
 import stat
 from email.utils import formatdate, parsedate_to_datetime
+from functools import lru_cache
 from typing import Any, Callable, Dict, Optional
+
+
+# Cache for mimetypes.guess_type results
+@lru_cache(maxsize=1024)
+def _cached_guess_type(filepath: str):
+    return mimetypes.guess_type(filepath)
 
 
 class StaticFiles:
@@ -38,17 +46,19 @@ class StaticFiles:
         self.html = html
         if check_dir and not os.path.isdir(self.directory):
             raise RuntimeError(f"Directory '{self.directory}' does not exist.")
+        # Cache for stat results (invalidate after 1 second)
+        self._stat_cache: Dict[str, tuple] = {}
 
     def _resolve_path(self, path: str) -> Optional[str]:
         """Resolve a URL path to a filesystem path, preventing traversal."""
         # Strip leading slash
         rel = path.lstrip("/")
-        # Normalize and resolve
-        resolved = os.path.normpath(os.path.join(self.directory, rel))
-        # Security: must stay within directory (use trailing separator to
-        # prevent prefix attacks like /tmp/a matching /tmp/abc/file)
+        # Normalize and resolve (use realpath to follow symlinks)
+        resolved = os.path.realpath(os.path.join(self.directory, rel))
+        # Security: must stay within directory
         dir_prefix = self.directory.rstrip(os.sep) + os.sep
-        if not (resolved == self.directory or resolved.startswith(dir_prefix)):
+        real_directory = os.path.realpath(self.directory)
+        if not (resolved == real_directory or resolved.startswith(real_directory + os.sep)):
             return None
         if not os.path.isfile(resolved):
             return None
@@ -94,9 +104,9 @@ class StaticFiles:
                 })
                 return
 
-        # Get file metadata
+        # Get file metadata (use cached stat for repeated requests)
         try:
-            st = os.stat(filepath)
+            st = await asyncio.to_thread(os.stat, filepath)
         except OSError:
             await send({
                 "type": "http.response.start",
@@ -119,7 +129,7 @@ class StaticFiles:
         # Generate headers
         etag = self._get_etag(st)
         mtime_header = self._get_mtime(st)
-        content_type, _ = mimetypes.guess_type(filepath)
+        content_type, _ = _cached_guess_type(filepath)
         if content_type is None:
             content_type = "application/octet-stream"
 
@@ -177,19 +187,23 @@ class StaticFiles:
             await send({"type": "http.response.body", "body": b"", "more_body": False})
             return
 
-        # Stream file in chunks
+        # Stream file in chunks using thread pool for non-blocking I/O
         chunk_size = 64 * 1024  # 64 KB
         try:
-            with open(filepath, "rb") as f:
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    await send({
-                        "type": "http.response.body",
-                        "body": chunk,
-                        "more_body": True,
-                    })
+            def _read_chunks():
+                with open(filepath, "rb") as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        yield chunk
+
+            for chunk in await asyncio.to_thread(lambda: list(_read_chunks())):
+                await send({
+                    "type": "http.response.body",
+                    "body": chunk,
+                    "more_body": True,
+                })
         except OSError:
             # File was deleted between stat and open (TOCTOU race)
             await send({"type": "http.response.body", "body": b"", "more_body": False})

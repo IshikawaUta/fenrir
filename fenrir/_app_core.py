@@ -67,8 +67,9 @@ class Blueprint:
 
     def middleware(self, middleware_type: str = "request"):
         def decorator(func):
-            if middleware_type in ("request", "response"):
-                self.middlewares[middleware_type].append(func)
+            if middleware_type not in ("request", "response"):
+                raise ValueError(f"Invalid middleware_type: {middleware_type!r}. Must be 'request' or 'response'.")
+            self.middlewares[middleware_type].append(func)
             return func
         return decorator
 
@@ -265,8 +266,9 @@ class FenrirCoreMixin:
 
     def middleware(self, middleware_type: str = "request"):
         def decorator(func):
-            if middleware_type in ("request", "response"):
-                self.middlewares[middleware_type].append(func)
+            if middleware_type not in ("request", "response"):
+                raise ValueError(f"Invalid middleware_type: {middleware_type!r}. Must be 'request' or 'response'.")
+            self.middlewares[middleware_type].append(func)
             return func
         return decorator
 
@@ -284,11 +286,15 @@ class FenrirCoreMixin:
         self.blueprints.append(blueprint)
         self.teardown_request_funcs[blueprint.name] = list(blueprint.teardown_request_funcs)
         for path, handler, methods in blueprint.routes:
+            if not path.startswith("/"):
+                path = "/" + path
             full_path = blueprint.url_prefix + path
             self.router.add_route(full_path, handler, methods)
             new_route = self.router.routes[-1]
             self._route_blueprints[new_route] = blueprint
         for path, handler in blueprint.websocket_routes:
+            if not path.startswith("/"):
+                path = "/" + path
             full_path = blueprint.url_prefix + path
             self.router.add_websocket_route(full_path, handler)
 
@@ -302,7 +308,11 @@ class FenrirCoreMixin:
         return decorator
 
     def add_task(self, coro: Any) -> asyncio.Task:
-        if inspect.iscoroutinefunction(coro):
+        # Use cached async check
+        is_async = getattr(coro, "_is_async", None)
+        if is_async is None:
+            is_async = inspect.iscoroutinefunction(coro)
+        if is_async:
             coro_obj = coro()
         else:
             coro_obj = coro
@@ -356,8 +366,8 @@ class FenrirCoreMixin:
         for func in reversed(funcs):
             try:
                 func(exc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Teardown request error: %s", e)
 
     def do_teardown_appcontext(self, exc: Optional[BaseException] = None):
         for func in reversed(self.teardown_appcontext_funcs):

@@ -1,3 +1,4 @@
+import inspect
 import re
 from typing import Dict, Any, List, Tuple, Callable, Optional, Type
 from fenrir.exceptions import HTTPMethodNotAllowed, HTTPNotFound
@@ -207,6 +208,8 @@ class Route:
         self.handler = handler
         self.methods = [m.upper() for m in (methods or ["GET"])]
         self.regex, self.converters = compile_path(path_pattern)
+        # Cache async status at registration time (avoids inspect.iscoroutinefunction on every call)
+        self._is_async = inspect.iscoroutinefunction(handler) if handler is not None else False
         # OpenAPI / serialization metadata
         self.response_model = response_model
         self.response_model_include = response_model_include

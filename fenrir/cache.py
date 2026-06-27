@@ -312,11 +312,12 @@ class FileCache(CacheBackend):
         return self._cache_dir / f"{safe_key}.cache"
 
     async def get(self, key: str) -> Any:
+        import asyncio
         path = self._get_path(key)
-        if not path.exists():
+        if not await asyncio.to_thread(path.exists):
             return None
         try:
-            data = path.read_bytes()
+            data = await asyncio.to_thread(path.read_bytes)
             if _HAS_ORJSON:
                 entry = _orjson.loads(data)
             else:
@@ -324,12 +325,13 @@ class FileCache(CacheBackend):
             if entry["expires_at"] is None or time.time() < entry["expires_at"]:
                 return entry["value"]
             else:
-                path.unlink(missing_ok=True)
+                await asyncio.to_thread(path.unlink, True)
         except Exception:
-            path.unlink(missing_ok=True)
+            await asyncio.to_thread(path.unlink, True)
         return None
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        import asyncio
         ttl = ttl if ttl is not None else self._ttl
         expires_at = time.time() + ttl if ttl > 0 else None
         entry = {"value": value, "expires_at": expires_at, "created_at": time.time()}
@@ -341,39 +343,44 @@ class FileCache(CacheBackend):
         # Atomic write: write to temp file, then rename
         temp_path = path.with_suffix(".tmp")
         try:
-            temp_path.write_bytes(data)
-            temp_path.rename(path)
+            await asyncio.to_thread(temp_path.write_bytes, data)
+            await asyncio.to_thread(temp_path.rename, path)
         except Exception:
-            temp_path.unlink(missing_ok=True)
+            await asyncio.to_thread(temp_path.unlink, True)
             raise
 
     async def delete(self, key: str) -> bool:
+        import asyncio
         path = self._get_path(key)
-        if path.exists():
-            path.unlink()
+        if await asyncio.to_thread(path.exists):
+            await asyncio.to_thread(path.unlink)
             return True
         return False
 
     async def exists(self, key: str) -> bool:
+        import asyncio
         path = self._get_path(key)
-        if not path.exists():
+        if not await asyncio.to_thread(path.exists):
             return False
         try:
-            data = path.read_bytes()
+            data = await asyncio.to_thread(path.read_bytes)
             if _HAS_ORJSON:
                 entry = _orjson.loads(data)
             else:
                 entry = json.loads(data.decode("utf-8"))
             if entry["expires_at"] is None or time.time() < entry["expires_at"]:
                 return True
-            path.unlink(missing_ok=True)
+            await asyncio.to_thread(path.unlink, True)
         except Exception:
             pass
         return False
 
     async def clear(self) -> None:
-        for path in self._cache_dir.glob("*.cache"):
-            path.unlink(missing_ok=True)
+        import asyncio
+        def _clear():
+            for path in self._cache_dir.glob("*.cache"):
+                path.unlink(missing_ok=True)
+        await asyncio.to_thread(_clear)
 
 
 class Cache:

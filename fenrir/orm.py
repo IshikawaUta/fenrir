@@ -610,8 +610,7 @@ class Model(metaclass=ModelMeta):
         # Warn about unknown kwargs
         for key, value in kwargs.items():
             if key not in meta["fields"]:
-                logger.debug("Setting unknown attribute '%s' on %s", key, type(self).__name__)
-                setattr(self, key, value)
+                raise TypeError(f"__init__() got an unexpected keyword argument '{key}' for {type(self).__name__}")
 
     @classmethod
     def _from_row(cls, row: Any) -> "Model":
@@ -676,11 +675,12 @@ class Model(metaclass=ModelMeta):
         table = meta["tablename"]
         # Use RETURNING clause for PostgreSQL to avoid race condition
         if self._db._dialect == "postgresql" and meta["primary_key"]:
-            pk_col = meta["primary_key"]
+            pk_field = meta["primary_key"]
+            pk_col = getattr(meta["fields"].get(pk_field), "column_name", None) or pk_field
             sql = f"INSERT INTO {table} ({', '.join(fields_list)}) VALUES ({', '.join(placeholders)}) RETURNING {pk_col}"
             result = await self._db.fetch_one(sql, values)
             if result and pk_col in result:
-                setattr(self, pk_col, result[pk_col])
+                setattr(self, pk_field, result[pk_col])
         else:
             sql = f"INSERT INTO {table} ({', '.join(fields_list)}) VALUES ({', '.join(placeholders)})"
             cursor = await self._db.execute(sql, values)
@@ -998,10 +998,13 @@ class Database:
             await self.connect()
         if self._dialect == "sqlite":
             await self._conn.executemany(sql, params_list)
-            await self._conn.commit()
         else:
             await self._conn.executemany(sql, params_list)
-            await self._conn.commit()
+        if not self._in_transaction:
+            if self._dialect == "sqlite":
+                await self._conn.commit()
+            else:
+                await self._conn.commit()
 
     def register_model(self, model_class: type) -> None:
         """Register a model class for auto table creation."""

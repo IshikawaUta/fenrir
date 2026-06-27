@@ -63,7 +63,8 @@ class MethodView(View):
             from fenrir.response import Response
             return Response(b"", status=200, headers={"allow": ", ".join(sorted(allowed))})
         if meth is None:
-            raise RuntimeError(f"Unimplemented method {method!r}")
+            from fenrir.exceptions import HTTPMethodNotAllowed
+            raise HTTPMethodNotAllowed(method=method)
 
         if req is not None:
             # Get app from context to access router for path param extraction

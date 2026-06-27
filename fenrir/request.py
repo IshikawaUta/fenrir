@@ -1,7 +1,10 @@
+import logging
 import urllib.parse
 from typing import AsyncIterator, Dict, Any, List, Optional
 
 from fenrir.json import json_loads
+
+logger = logging.getLogger("fenrir.request")
 
 class Request:
     def __init__(self, scope: Dict[str, Any]):
@@ -10,28 +13,11 @@ class Request:
         self.path = scope.get("path", "/")
         self.query_string = scope.get("query_string", b"")
         
-        # Parse query params
-        self.args: Dict[str, str] = {}
-        self.args_list: Dict[str, List[str]] = {}
-        if self.query_string:
-            qs = self.query_string.decode("latin1")
-            parsed_qs = urllib.parse.parse_qs(qs)
-            self.args_list = parsed_qs
-            self.args = {k: v[0] for k, v in parsed_qs.items()}
-
-        # Parse headers (case-insensitive)
-        self.headers: Dict[str, str] = {}
-        for k, v in scope.get("headers", []):
-            self.headers[k.decode("latin1").lower()] = v.decode("latin1")
-
-        # Cookies
-        self.cookies: Dict[str, str] = {}
-        cookie_header = self.headers.get("cookie", "")
-        if cookie_header:
-            for item in cookie_header.split(";"):
-                if "=" in item:
-                    k, v = item.strip().split("=", 1)
-                    self.cookies[k] = v
+        # Lazy parsing caches (populated on first access)
+        self._args: Optional[Dict[str, str]] = None
+        self._args_list: Optional[Dict[str, List[str]]] = None
+        self._headers: Optional[Dict[str, str]] = None
+        self._cookies: Optional[Dict[str, str]] = None
 
         self._body = b""
         self._json = None
@@ -39,6 +25,56 @@ class Request:
         self._parsed = False
         self.session = None
         self._receive = None
+
+    def _parse_headers(self) -> None:
+        """Parse headers from scope (lazy)."""
+        self._headers = {}
+        for k, v in self.scope.get("headers", []):
+            self._headers[k.decode("latin1").lower()] = v.decode("latin1")
+
+    def _parse_query(self) -> None:
+        """Parse query params from query_string (lazy)."""
+        self._args_list = {}
+        self._args = {}
+        if self.query_string:
+            qs = self.query_string.decode("latin1")
+            parsed_qs = urllib.parse.parse_qs(qs)
+            self._args_list = parsed_qs
+            self._args = {k: v[0] for k, v in parsed_qs.items()}
+
+    def _parse_cookies(self) -> None:
+        """Parse cookies from cookie header (lazy)."""
+        self._cookies = {}
+        cookie_header = self.headers.get("cookie", "")
+        if cookie_header:
+            for item in cookie_header.split(";"):
+                if "=" in item:
+                    k, v = item.strip().split("=", 1)
+                    self._cookies[k] = v
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        if self._headers is None:
+            self._parse_headers()
+        return self._headers
+
+    @property
+    def args(self) -> Dict[str, str]:
+        if self._args is None:
+            self._parse_query()
+        return self._args
+
+    @property
+    def args_list(self) -> Dict[str, List[str]]:
+        if self._args_list is None:
+            self._parse_query()
+        return self._args_list
+
+    @property
+    def cookies(self) -> Dict[str, str]:
+        if self._cookies is None:
+            self._parse_cookies()
+        return self._cookies
 
     @property
     def host(self) -> str:
@@ -118,7 +154,8 @@ class Request:
         if self._json is None and self._body:
             try:
                 self._json = json_loads(self._body)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse JSON body: %s", e)
                 self._json = None
         return self._json
 

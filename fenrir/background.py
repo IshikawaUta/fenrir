@@ -36,10 +36,12 @@ class BackgroundTask:
         self.func = func
         self.args = args
         self.kwargs = kwargs
+        # Cache async status at creation time
+        self._is_async = inspect.iscoroutinefunction(func)
 
     async def __call__(self) -> None:
         try:
-            if inspect.iscoroutinefunction(self.func):
+            if self._is_async:
                 await self.func(*self.args, **self.kwargs)
             else:
                 await to_thread(self.func, *self.args, **self.kwargs)

@@ -17,7 +17,9 @@ class Response:
         self._status = 200
         self.status = status
         self.headers = headers or {}
-        if "content-type" not in {k.lower() for k in self.headers}:
+        # Fast check: only scan headers if we need to set content-type
+        # Case-insensitive check (Content-Type vs content-type)
+        if content_type and not any(k.lower() == "content-type" for k in self.headers):
             self.headers["content-type"] = content_type
         
         if isinstance(body, str):
@@ -38,7 +40,7 @@ class Response:
             if parts[0].isdigit():
                 self._status = int(parts[0])
             else:
-                self._status = 200
+                raise ValueError(f"Invalid status code: {value!r}")
         else:
             self._status = value
 
@@ -169,6 +171,7 @@ class Response:
 
 class JSONResponse(Response):
     def __init__(self, content: Any, status: int = 200, headers: Dict[str, str] = None):
+        # Try custom JSON provider first (supports custom serializers)
         from fenrir.context import current_app
         try:
             app = current_app._get_current_object()
@@ -177,13 +180,18 @@ class JSONResponse(Response):
             
         if app is not None and hasattr(app, "json"):
             body = app.json.dumps(content)
+            if isinstance(body, str):
+                body = body.encode("utf-8")
+        elif _HAS_ORJSON:
+            # Fast path: use orjson directly to bytes (avoids double encode/decode)
+            body = _orjson.dumps(content)
+            if not isinstance(body, bytes):
+                body = body.encode("utf-8")
         else:
-            if _HAS_ORJSON:
-                result = _orjson.dumps(content)
-                body = result.decode("utf-8") if isinstance(result, bytes) else result
-            else:
-                from fenrir.json import DefaultJSONProvider
-                body = DefaultJSONProvider(None).dumps(content)
+            from fenrir.json import DefaultJSONProvider
+            body = DefaultJSONProvider(None).dumps(content)
+            if isinstance(body, str):
+                body = body.encode("utf-8")
             
         super().__init__(
             body=body,
@@ -332,7 +340,7 @@ class FileResponse(Response):
         if filename is None:
             filename = os.path.basename(path)
         if filename:
-            safe_filename = filename.replace('"', '').replace('\r', '').replace('\n', '')
+            safe_filename = filename.replace('"', '').replace('\r', '').replace('\n', '').replace('\x00', '')
             self.headers.setdefault(
                 "content-disposition",
                 f'{content_disposition_type}; filename="{safe_filename}"'

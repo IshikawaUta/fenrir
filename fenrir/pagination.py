@@ -85,6 +85,8 @@ def paginate(
         return paginate(items, page=1, size=20)
     """
     total = len(items)
+    if size <= 0:
+        size = 1
     pages = max(1, math.ceil(total / size))
     page = max(1, min(page, pages))
     start = (page - 1) * size

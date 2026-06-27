@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import gzip
 import logging
+import secrets
 import time
 import uuid
 import zlib
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from fenrir.json import json_dumps
@@ -52,34 +53,38 @@ class CORSMiddleware:
         self.expose_headers = expose_headers if isinstance(expose_headers, list) else [expose_headers] if expose_headers else []
         self.max_age = max_age
         self._all_origins = "*" in self.allow_origins
+        # Pre-encode header names to avoid repeated .encode() calls on every request
+        self._header_name_bytes = {name: name.encode("latin-1") for name in [
+            "access-control-allow-origin", "vary", "access-control-allow-credentials",
+            "access-control-expose-headers", "access-control-allow-methods",
+            "access-control-allow-headers", "access-control-max-age",
+        ]}
 
     def _is_origin_allowed(self, origin: str) -> bool:
         if self._all_origins:
             return True
         return origin in self.allow_origins
 
-    def _get_cors_headers(self, origin: Optional[str], is_preflight: bool = False) -> Dict[str, str]:
-        headers: Dict[str, str] = {}
+    def _get_cors_headers(self, origin: Optional[str], is_preflight: bool = False) -> Dict[bytes, bytes]:
+        """Returns pre-encoded (name_bytes, value_bytes) header pairs."""
+        headers: Dict[bytes, bytes] = {}
+        h = self._header_name_bytes
         if origin and self._is_origin_allowed(origin):
-            # Always echo the specific origin when origin is present and allowed.
-            # This is the standard CORS behavior — browsers reject "*" with
-            # credentialed requests, so echoing is the safe default.
-            headers["access-control-allow-origin"] = origin
-            headers["vary"] = "Origin"
+            headers[h["access-control-allow-origin"]] = origin.encode("latin-1")
+            headers[h["vary"]] = b"Origin"
         elif self._all_origins and not origin:
-            # Only use "*" when no origin header is present (e.g., server-to-server)
-            headers["access-control-allow-origin"] = "*"
+            headers[h["access-control-allow-origin"]] = b"*"
 
         if self.allow_credentials:
-            headers["access-control-allow-credentials"] = "true"
+            headers[h["access-control-allow-credentials"]] = b"true"
 
         if self.expose_headers:
-            headers["access-control-expose-headers"] = ", ".join(self.expose_headers)
+            headers[h["access-control-expose-headers"]] = ", ".join(self.expose_headers).encode("latin-1")
 
         if is_preflight:
-            headers["access-control-allow-methods"] = ", ".join(self.allow_methods)
-            headers["access-control-allow-headers"] = ", ".join(self.allow_headers)
-            headers["access-control-max-age"] = str(self.max_age)
+            headers[h["access-control-allow-methods"]] = ", ".join(self.allow_methods).encode("latin-1")
+            headers[h["access-control-allow-headers"]] = ", ".join(self.allow_headers).encode("latin-1")
+            headers[h["access-control-max-age"]] = str(self.max_age).encode("ascii")
 
         return headers
 
@@ -102,24 +107,21 @@ class CORSMiddleware:
 
         if method == "OPTIONS":
             cors_headers = self._get_cors_headers(origin, is_preflight=True)
-            if cors_headers:
-                await send({
-                    "type": "http.response.start",
-                    "status": 204,
-                    "headers": [
-                        (k.encode("latin-1"), v.encode("latin-1"))
-                        for k, v in cors_headers.items()
-                    ],
-                })
-                await send({"type": "http.response.body", "body": b""})
-                return
+            # Always respond to preflight with 204, even if origin is disallowed.
+            # Passing through to the app would return 404/500 for a valid preflight.
+            await send({
+                "type": "http.response.start",
+                "status": 204,
+                "headers": list(cors_headers.items()),
+            })
+            await send({"type": "http.response.body", "body": b""})
+            return
 
         async def send_wrapper(message: Dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 cors_headers = self._get_cors_headers(origin)
                 existing = dict(message.get("headers", []))
-                for k, v in cors_headers.items():
-                    existing[k.encode("latin-1")] = v.encode("latin-1")
+                existing.update(cors_headers)
                 message["headers"] = list(existing.items())
             await send(message)
 
@@ -137,8 +139,7 @@ class CORSMiddleware:
                 if message["type"] == "websocket.http.response.start":
                     cors_headers = self._get_cors_headers(origin)
                     existing = dict(message.get("headers", []))
-                    for hk, hv in cors_headers.items():
-                        existing[hk.encode("latin-1")] = hv.encode("latin-1")
+                    existing.update(cors_headers)
                     message["headers"] = list(existing.items())
                 await send(message)
             await self.app(scope, receive, send_wrapper)
@@ -359,6 +360,9 @@ class RequestIDMiddleware:
         self.app = app
         self.header_name = header_name
         self.generator = generator or (lambda: str(uuid.uuid4()))
+        # Pre-encode header names
+        self._header_name_lower = header_name.lower()
+        self._header_name_bytes = self._header_name_lower.encode("latin-1")
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
         if scope["type"] != "http":
@@ -374,10 +378,13 @@ class RequestIDMiddleware:
         if not request_id:
             request_id = self.generator()
 
+        request_id_bytes = request_id.encode("latin-1")
+        hdr_name_bytes = self._header_name_bytes
+
         async def send_wrapper(message: Dict[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 hdrs = dict(message.get("headers", []))
-                hdrs[self.header_name.lower().encode("latin-1")] = request_id.encode("latin-1")
+                hdrs[hdr_name_bytes] = request_id_bytes
                 message["headers"] = list(hdrs.items())
             await send(message)
 
@@ -427,7 +434,7 @@ class RateLimitMiddleware:
         self.key_func = key_func or self._default_key
         self.retry_after_header = retry_after_header
         self._redis = redis_client
-        self._requests: Dict[str, List[float]] = defaultdict(list)
+        self._requests: Dict[str, deque] = defaultdict(deque)
         self._last_cleanup = time.monotonic()
         self._lock = asyncio.Lock()
 
@@ -657,7 +664,29 @@ class CSRFMiddleware:
 
     def _generate_token(self) -> str:
         import secrets
+        if self.secret_key:
+            import hmac
+            import hashlib
+            payload = secrets.token_hex(32)
+            sig = hmac.new(
+                self.secret_key.encode(), payload.encode(), hashlib.sha256
+            ).hexdigest()
+            return f"{payload}.{sig}"
         return secrets.token_hex(32)
+
+    def _verify_token(self, token: str) -> bool:
+        if not self.secret_key:
+            return True
+        import hmac
+        import hashlib
+        try:
+            payload, sig = token.rsplit(".", 1)
+            expected = hmac.new(
+                self.secret_key.encode(), payload.encode(), hashlib.sha256
+            ).hexdigest()
+            return hmac.compare_digest(sig, expected)
+        except (ValueError, AttributeError):
+            return False
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
         if scope["type"] != "http":
@@ -703,7 +732,7 @@ class CSRFMiddleware:
                     if part.startswith(f"{self.cookie_name}="):
                         cookie_token = part.split("=", 1)[1]
 
-        if not header_token or not cookie_token or header_token != cookie_token:
+        if not header_token or not cookie_token or not secrets.compare_digest(header_token, cookie_token) or not self._verify_token(header_token):
             body = json_dumps({"detail": "CSRF token missing or invalid."})
             await send({
                 "type": "http.response.start",

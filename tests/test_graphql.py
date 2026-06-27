@@ -49,3 +49,60 @@ class TestGraphQL:
         
         assert "GraphiQL" in html
         assert "/graphql" in html
+
+
+class TestQueryDepth:
+    def test_simple_query_depth(self):
+        """Test depth calculation for simple query."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = "{ user { name } }"
+        assert GraphQLRouter._query_depth(query) == 2
+
+    def test_nested_query_depth(self):
+        """Test depth calculation for deeply nested query."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = "{ user { posts { comments { author { name } } } }"
+        assert GraphQLRouter._query_depth(query) == 5
+
+    def test_single_brace_depth(self):
+        """Test depth calculation for single brace."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = "{ user }"
+        assert GraphQLRouter._query_depth(query) == 1
+
+    def test_query_with_string_depth(self):
+        """Test depth calculation ignores braces in strings."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = '{ user { name } }'
+        assert GraphQLRouter._query_depth(query) == 2
+
+    def test_query_with_fragment_depth(self):
+        """Test depth calculation with fragments."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = """
+        query {
+            user {
+                ...UserFields
+            }
+        }
+        """
+        assert GraphQLRouter._query_depth(query) == 2
+
+    def test_empty_query_depth(self):
+        """Test depth calculation for empty query."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = ""
+        assert GraphQLRouter._query_depth(query) == 0
+
+    def test_mutation_depth(self):
+        """Test depth calculation for mutation."""
+        from fenrir.graphql import GraphQLRouter
+        
+        query = "mutation { createUser(name: \"test\") { id name } }"
+        assert GraphQLRouter._query_depth(query) == 2

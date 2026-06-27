@@ -45,12 +45,11 @@ class EventSourceResponse(Response):
             else:
                 # Run sync generator in a thread to avoid blocking the event loop
                 import asyncio
-                def _collect_items():
-                    return list(self.generator)
-                items = await asyncio.get_event_loop().run_in_executor(None, _collect_items)
-                for item in items:
-                    formatted = self._format_event(item)
-                    await send_chunk(formatted)
+                async def _stream_sync():
+                    for item in self.generator:
+                        formatted = self._format_event(item)
+                        await send_chunk(formatted)
+                await _stream_sync()
         except Exception as e:
             logger.exception("SSE generator error: %s", e)
         finally:

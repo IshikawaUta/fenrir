@@ -5,6 +5,10 @@ from typing import Any, Callable, List, Tuple
 
 logger = logging.getLogger("fenrir.signals")
 
+# Cache for receiver async status (avoids inspect.iscoroutinefunction on every signal send)
+_receiver_is_async_cache: dict = {}
+
+
 def _handle_signal_error(task: asyncio.Task) -> None:
     try:
         task.result()
@@ -28,6 +32,7 @@ class Signal:
         self.receivers: List[Tuple[Callable, Any]] = []
 
     def connect(self, receiver: Callable, sender: Any = None, weak: bool = True):
+        # Note: weak reference support is not implemented; receivers are always strong references
         self.receivers.append((receiver, sender))
         return receiver
 
@@ -36,9 +41,16 @@ class Signal:
 
     def send(self, sender: Any = None, **kwargs: Any) -> List[Tuple[Callable, Any]]:
         results = []
-        for receiver, s in self.receivers:
+        # Copy list to avoid mutation during iteration
+        for receiver, s in list(self.receivers):
             if s is None or s == sender:
-                if inspect.iscoroutinefunction(receiver):
+                # Use cached async status
+                receiver_id = id(receiver)
+                is_async = _receiver_is_async_cache.get(receiver_id)
+                if is_async is None:
+                    is_async = inspect.iscoroutinefunction(receiver)
+                    _receiver_is_async_cache[receiver_id] = is_async
+                if is_async:
                     try:
                         loop = asyncio.get_running_loop()
                         task = loop.create_task(receiver(sender, **kwargs))
