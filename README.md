@@ -104,7 +104,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.1.0")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.1.1")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -232,7 +232,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v4.1.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.1.1 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -476,7 +476,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **1331 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.1.0 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **1536 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.1.1 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
 
 Run the test suite locally:
 
@@ -493,7 +493,9 @@ PYTHONPATH=. pytest -v
 
 ## 🔄 Changelog
 
-### v4.1.0 — Bug Fixes, Performance & Test Coverage
+### Fenrir v4.1.1 — Bug Fixes, Performance & Test Coverage
+
+**1536 tests validated**: the largest test suite in the framework’s history.
 
 **Bug Fixes (53+):**
 - Fixed CSRF token HMAC predictable randomness (now uses `secrets.token_hex(32)`)
