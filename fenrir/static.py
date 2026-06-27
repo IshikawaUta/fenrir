@@ -48,8 +48,6 @@ class StaticFiles:
         self.html = html
         if check_dir and not os.path.isdir(self.directory):
             raise RuntimeError(f"Directory '{self.directory}' does not exist.")
-        # Cache for stat results (invalidate after 1 second)
-        self._stat_cache: Dict[str, tuple] = {}
 
     def _resolve_path(self, path: str) -> Optional[str]:
         """Resolve a URL path to a filesystem path, preventing traversal."""

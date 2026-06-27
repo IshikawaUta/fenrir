@@ -115,7 +115,10 @@ class TestFileCache:
     def test_get_path(self, tmp_path):
         fc = FileCache(str(tmp_path), ttl=60)
         p = fc._get_path("testkey")
-        assert p.exists() or not p.exists()  # just ensure it returns a Path
+        assert p.suffix == ".cache"
+        # Path should be deterministic for same key
+        p2 = fc._get_path("testkey")
+        assert p == p2
 
     @pytest.mark.anyio
     async def test_set_write_error(self, tmp_path):

@@ -6,7 +6,9 @@ from typing import Any, Callable, List, Tuple
 logger = logging.getLogger("fenrir.signals")
 
 # Cache for receiver async status (avoids inspect.iscoroutinefunction on every signal send)
+# Bounded to prevent memory leak — evicts oldest entries when full
 _receiver_is_async_cache: dict = {}
+_RECEIVER_CACHE_MAX = 1024
 
 
 def _handle_signal_error(task: asyncio.Task) -> None:
@@ -44,11 +46,13 @@ class Signal:
         # Copy list to avoid mutation during iteration
         for receiver, s in list(self.receivers):
             if s is None or s == sender:
-                # Use cached async status
+                # Use cached async status (bounded cache)
                 receiver_id = id(receiver)
                 is_async = _receiver_is_async_cache.get(receiver_id)
                 if is_async is None:
                     is_async = inspect.iscoroutinefunction(receiver)
+                    if len(_receiver_is_async_cache) >= _RECEIVER_CACHE_MAX:
+                        _receiver_is_async_cache.pop(next(iter(_receiver_is_async_cache)))
                     _receiver_is_async_cache[receiver_id] = is_async
                 if is_async:
                     try:

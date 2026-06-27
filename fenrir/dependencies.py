@@ -12,7 +12,9 @@ _UploadFile = None
 _current_app = None
 
 # Cache for dependency async status (avoids inspect.iscoroutinefunction on every call)
+# Bounded to prevent memory leak — evicts oldest entries when full
 _dep_is_async_cache: Dict[int, bool] = {}
+_DEP_CACHE_MAX = 1024
 
 
 def _is_async_dep(dep_func):
@@ -24,6 +26,8 @@ def _is_async_dep(dep_func):
     result = inspect.iscoroutinefunction(dep_func) or (
         hasattr(dep_func, "__call__") and inspect.iscoroutinefunction(dep_func.__call__)
     )
+    if len(_dep_is_async_cache) >= _DEP_CACHE_MAX:
+        _dep_is_async_cache.pop(next(iter(_dep_is_async_cache)))
     _dep_is_async_cache[dep_id] = result
     return result
 

@@ -358,7 +358,7 @@ class FileResponse(Response):
         """Yield file contents in chunks without blocking the event loop."""
         import asyncio
         chunk_size = 64 * 1024  # 64 KB
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _read_chunk(f):
             return f.read(chunk_size)

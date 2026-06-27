@@ -18,7 +18,9 @@ from fenrir.signals import request_started, request_finished, got_request_except
 logger = logging.getLogger("fenrir")
 
 # Cache for listener async status (avoids inspect.iscoroutinefunction on every event)
+# Bounded to prevent memory leak — evicts oldest entries when full
 _listener_is_async_cache: dict = {}
+_LISTENER_CACHE_MAX = 1024
 
 _STATUS_TEXTS = {
     400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
@@ -884,11 +886,14 @@ function expandAll() {{
 
     async def _trigger_listeners(self, event: str):
         for listener in self.listeners.get(event, []):
-            # Use cached async status
+            # Use cached async status (bounded cache)
             listener_id = id(listener)
             is_async = _listener_is_async_cache.get(listener_id)
             if is_async is None:
                 is_async = inspect.iscoroutinefunction(listener)
+                if len(_listener_is_async_cache) >= _LISTENER_CACHE_MAX:
+                    # Evict oldest entry (simple FIFO)
+                    _listener_is_async_cache.pop(next(iter(_listener_is_async_cache)))
                 _listener_is_async_cache[listener_id] = is_async
             if is_async:
                 await listener(self)

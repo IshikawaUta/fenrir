@@ -123,7 +123,7 @@ class Field:
         if isinstance(value, (int, float)):
             return str(value)
         if isinstance(value, str):
-            escaped = value.replace("'", "''")
+            escaped = value.replace("\\", "\\\\").replace("'", "''")
             return f"'{escaped}'"
         return f"'{str(value)}'"
 
@@ -422,6 +422,13 @@ class QuerySet:
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         return where, params
 
+    def _safe_table(self) -> str:
+        """Validate and return table name to prevent SQL injection."""
+        table = self.model_class._meta["tablename"]
+        if not table.replace("_", "").replace(".", "").isalnum():
+            raise ValueError(f"Invalid table name: {table!r}")
+        return table
+
     def _build_order(self) -> str:
         if not self._order:
             return ""
@@ -446,7 +453,7 @@ class QuerySet:
         return " ORDER BY " + ", ".join(parts)
 
     async def _fetch_all(self) -> List[Any]:
-        table = self.model_class._meta["tablename"]
+        table = self._safe_table()
         where, params = self._build_where()
         order = self._build_order()
         sql = f"SELECT * FROM {table}{where}{order}"
@@ -460,7 +467,7 @@ class QuerySet:
         return [self.model_class._from_row(row) for row in rows]
 
     async def _fetch_one(self) -> Optional[Any]:
-        table = self.model_class._meta["tablename"]
+        table = self._safe_table()
         where, params = self._build_where()
         order = self._build_order()
         sql = f"SELECT * FROM {table}{where}{order} LIMIT 1"
@@ -470,7 +477,7 @@ class QuerySet:
         return None
 
     async def _count(self) -> int:
-        table = self.model_class._meta["tablename"]
+        table = self._safe_table()
         where, params = self._build_where()
         sql = f"SELECT COUNT(*) as cnt FROM {table}{where}"
         row = await self.db.fetch_one(sql, params)
@@ -496,7 +503,7 @@ class QuerySet:
         return await self._exists()
 
     async def delete(self) -> int:
-        table = self.model_class._meta["tablename"]
+        table = self._safe_table()
         where, params = self._build_where()
         sql = f"DELETE FROM {table}{where}"
         result = await self.db.execute(sql, params)

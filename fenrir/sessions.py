@@ -52,8 +52,10 @@ class SessionInterface:
 
 class SecureCookieSessionInterface(SessionInterface):
     salt = "cookie-session"
-    _cached_key: Optional[str] = None
-    _cached_serializer: Optional[URLSafeTimedSerializer] = None
+
+    def __init__(self):
+        self._cached_key: Optional[str] = None
+        self._cached_serializer: Optional[URLSafeTimedSerializer] = None
 
     def get_serializer(self, app: Any) -> Optional[URLSafeTimedSerializer]:
         secret_key = app.config.get("SECRET_KEY")

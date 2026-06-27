@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import queue as _queue
+import threading
 from typing import Any, AsyncIterable, Union, Dict, Optional
 from fenrir.response import Response
 
@@ -44,12 +47,25 @@ class EventSourceResponse(Response):
                     await send_chunk(formatted)
             else:
                 # Run sync generator in a thread to avoid blocking the event loop
-                import asyncio
-                async def _stream_sync():
-                    for item in self.generator:
-                        formatted = self._format_event(item)
-                        await send_chunk(formatted)
-                await _stream_sync()
+                loop = asyncio.get_running_loop()
+                q: _queue.Queue = _queue.Queue()
+
+                def _produce():
+                    try:
+                        for item in self.generator:
+                            q.put(item)
+                    finally:
+                        q.put(None)
+
+                t = threading.Thread(target=_produce, daemon=True)
+                t.start()
+
+                while True:
+                    item = await loop.run_in_executor(None, q.get)
+                    if item is None:
+                        break
+                    formatted = self._format_event(item)
+                    await send_chunk(formatted)
         except Exception as e:
             logger.exception("SSE generator error: %s", e)
         finally:

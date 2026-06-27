@@ -146,12 +146,13 @@ class ResponseCache:
         # Evict expired entries first, then LRU
         while len(self._cache) > self._max_size:
             now = time.time()
-            # Collect expired keys first to avoid dict mutation during iteration
+            # Evict expired entries first
             expired_keys = [k for k, (_, exp) in self._cache.items() if exp <= now]
             if expired_keys:
                 for k in expired_keys:
                     self._cache.pop(k, None)
             else:
+                # No expired entries — evict oldest LRU entry directly
                 self._cache.popitem(last=False)
 
     def invalidate(self, key: str) -> bool:

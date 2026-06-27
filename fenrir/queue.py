@@ -255,10 +255,12 @@ class RedisQueue(QueueBackend):
         self._redis_url = redis_url
         self._prefix = prefix
         self._redis = None
-        self._init_lock = asyncio.Lock()
+        self._init_lock = None
 
     async def _get_redis(self):
         if self._redis is None:
+            if self._init_lock is None:
+                self._init_lock = asyncio.Lock()
             async with self._init_lock:
                 if self._redis is None:
                     try:

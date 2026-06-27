@@ -125,6 +125,8 @@ class RequestContext:
             if hasattr(self.app, 'do_teardown_request'):
                 self.app.do_teardown_request(exc_val)
         finally:
-            _request_ctx_var.reset(self._token_req)
-            _g_ctx_var.reset(self._token_g)
+            if self._token_req is not None:
+                _request_ctx_var.reset(self._token_req)
+            if self._token_g is not None:
+                _g_ctx_var.reset(self._token_g)
             self.app_ctx.__exit__(exc_type, exc_val, exc_tb)

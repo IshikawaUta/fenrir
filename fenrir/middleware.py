@@ -717,7 +717,12 @@ class CSRFMiddleware:
                     if message["type"] == "http.response.start":
                         headers = dict(message.get("headers", []))
                         cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax"
-                        headers[b"set-cookie"] = cookie_val.encode("latin-1")
+                        # Append, don't replace — preserve existing set-cookie headers (e.g., session)
+                        existing_cookies = headers.get(b"set-cookie", b"")
+                        if existing_cookies:
+                            headers[b"set-cookie"] = existing_cookies + b"\r\n" + cookie_val.encode("latin-1")
+                        else:
+                            headers[b"set-cookie"] = cookie_val.encode("latin-1")
                         message["headers"] = list(headers.items())
                     await send(message)
                 await self.app(scope, receive, send_with_csrf)
