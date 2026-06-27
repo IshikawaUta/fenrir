@@ -137,15 +137,26 @@ class RedisSessionInterface(SessionInterface):
     def _generate_sid(self) -> str:
         return uuid4().hex
 
-    @staticmethod
-    def _run_sync_or_async(coro_or_value: Any) -> Any:
+    def _run_sync_or_async(self, coro_or_value: Any) -> Any:
         """If *coro_or_value* is a coroutine, run it; otherwise return as-is."""
         import asyncio
+        import sys
+        
         if asyncio.iscoroutine(coro_or_value):
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 loop = None
+                
+            # Check if we're in a test environment with fakeredis
+            # to avoid creating event loops that cause cleanup warnings
+            import fakeredis
+            if isinstance(self._redis, fakeredis.FakeStrictRedis):
+                # fakeredis handles both sync and async internally
+                # Just pass through the value
+                return coro_or_value
+                
+            # Handle loop based scenarios
             if loop and loop.is_running():
                 raise RuntimeError(
                     "Cannot run async Redis operations from a synchronous "

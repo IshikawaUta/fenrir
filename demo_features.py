@@ -13,7 +13,7 @@ from fenrir import Fenrir, render_template, JSONResponse
 from fenrir.features import init_fenrir_monitoring
 
 # Create the app
-app = Fenrir(title="Fenrir Features Demo", version="4.1.0")
+app = Fenrir(title="Fenrir Features Demo", version="4.1.1")
 
 # Enable monitoring feature
 # This will only activate if MONITORING_ENABLED=true in .env

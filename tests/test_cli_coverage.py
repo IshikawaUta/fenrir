@@ -104,7 +104,7 @@ class TestMain:
         with patch('sys.argv', ["fenrir", "--help"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
-            assert exc_info.value.code == 0
+        assert exc_info.value.code == 0
 
     def test_main_version(self, capsys, monkeypatch):
         with patch('sys.argv', ["fenrir", "--version"]):
@@ -112,21 +112,21 @@ class TestMain:
                 main()
 
     def test_routes_no_app(self):
-        # Create a mock app
-        mock_app = type('MockApp', (), {
-            'title': 'TestApp',
-            'version': '1.0.0',
-            '_route_blueprints': {},
-            'router': type('Router', (), {
-                'routes': [],
-                'websocket_routes': []
+        with patch('fenrir.cli.load_app') as mock_load_app:
+            mock_app = type('MockApp', (), {
+                'title': 'TestApp',
+                'version': '1.0.0',
+                '_route_blueprints': {},
+                'router': type('Router', (), {
+                    'routes': [],
+                    'websocket_routes': []
+                })()
             })()
-        })()
-        
-        # Mock load_app to return our mock app
-        with patch('fenrir.cli.load_app', return_value=mock_app):
+            mock_load_app.return_value = mock_app
+            
             from fenrir.cli import cmd_routes
-            # Create a mock args object with target
-            args = type('Args', (), {'target': 'mock:app'})()
-            # cmd_routes should run without error
-            cmd_routes(args)
+            # Mock sys.argv for cmd_routes
+            with patch('sys.argv', ["fenrir", "routes", "mock:app"]):
+                # cmd_routes doesn't return, so we just call it
+                args = type('Args', (), {'target': 'mock:app'})()
+                cmd_routes(args)
