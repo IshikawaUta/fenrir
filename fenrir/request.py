@@ -18,6 +18,7 @@ class Request:
         self._args_list: Optional[Dict[str, List[str]]] = None
         self._headers: Optional[Dict[str, str]] = None
         self._cookies: Optional[Dict[str, str]] = None
+        self._host: Optional[str] = None
 
         self._body = b""
         self._json = None
@@ -78,6 +79,8 @@ class Request:
 
     @property
     def host(self) -> str:
+        if self._host is not None:
+            return self._host
         h = self.headers.get("host", "")
         from fenrir.context import current_app
         try:
@@ -95,6 +98,7 @@ class Request:
             if not any(match_host(host_only, p) for p in trusted):
                 from fenrir.exceptions import HTTPBadRequest
                 raise HTTPBadRequest(detail="Invalid Host header")
+        self._host = h
         return h
 
     async def _read_body(self, receive):
