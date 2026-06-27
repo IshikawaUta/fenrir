@@ -14,6 +14,8 @@ from email.utils import formatdate, parsedate_to_datetime
 from functools import lru_cache
 from typing import Any, Callable, Dict, Optional
 
+from fenrir.compat import to_thread
+
 
 # Cache for mimetypes.guess_type results
 @lru_cache(maxsize=1024)
@@ -106,7 +108,7 @@ class StaticFiles:
 
         # Get file metadata (use cached stat for repeated requests)
         try:
-            st = await asyncio.to_thread(os.stat, filepath)
+            st = await to_thread(os.stat, filepath)
         except OSError:
             await send({
                 "type": "http.response.start",
@@ -198,7 +200,7 @@ class StaticFiles:
                             break
                         yield chunk
 
-            for chunk in await asyncio.to_thread(lambda: list(_read_chunks())):
+            for chunk in await to_thread(lambda: list(_read_chunks())):
                 await send({
                     "type": "http.response.body",
                     "body": chunk,

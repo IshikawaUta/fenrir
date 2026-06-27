@@ -223,15 +223,15 @@ class TestRedisSessionLoop:
 
 class TestFileCacheAsync:
     def test_uses_to_thread(self):
-        """Verify FileCache uses asyncio.to_thread for I/O."""
+        """Verify FileCache uses to_thread (asyncio.to_thread or compat) for I/O."""
         from fenrir.cache import FileCache
         import inspect
         
         source = inspect.getsource(FileCache.get)
-        assert "asyncio.to_thread" in source
+        assert "to_thread" in source
         
         source = inspect.getsource(FileCache.set)
-        assert "asyncio.to_thread" in source
+        assert "to_thread" in source
 
 
 # ═══════════════════════════════════════════════════════════════════════

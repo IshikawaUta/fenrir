@@ -885,8 +885,14 @@ class Database:
         self._conn = None
         self._dialect = self._parse_dialect(url)
         self._models: List[type] = []
-        self._connect_lock = asyncio.Lock()
+        self._connect_lock = None  # Defer Lock creation for Python 3.8 compat
         self._in_transaction: bool = False
+
+    def _get_lock(self):
+        """Get or create the lock (deferred for Python 3.8 compat)."""
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        return self._connect_lock
 
     @contextmanager
     def transaction(self):
@@ -909,7 +915,7 @@ class Database:
 
     async def connect(self) -> None:
         """Establish database connection."""
-        async with self._connect_lock:
+        async with self._get_lock():
             if self._conn is not None:
                 return
 

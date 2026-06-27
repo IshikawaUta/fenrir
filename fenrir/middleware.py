@@ -436,7 +436,13 @@ class RateLimitMiddleware:
         self._redis = redis_client
         self._requests: Dict[str, deque] = defaultdict(deque)
         self._last_cleanup = time.monotonic()
-        self._lock = asyncio.Lock()
+        self._lock = None  # Defer Lock creation for Python 3.8 compat
+
+    def _get_lock(self):
+        """Get or create the lock (deferred for Python 3.8 compat)."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     @staticmethod
     def _default_key(scope: Dict[str, Any]) -> str:
@@ -465,7 +471,7 @@ class RateLimitMiddleware:
             del self._requests[key]
 
     async def _is_rate_limited(self, key: str) -> Tuple[bool, float]:
-        async with self._lock:
+        async with self._get_lock():
             now = time.monotonic()
             cutoff = now - self.window_seconds
             timestamps = self._requests.get(key)
