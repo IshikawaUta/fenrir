@@ -30,8 +30,34 @@ except ImportError:
 # asyncio.to_thread compatibility for Python 3.8.
 # IMPORTANT: use contextvars.copy_context() so that ContextVar values
 # (request context, session, etc.) are visible inside the thread.
+#
+# We use a dedicated ThreadPoolExecutor instead of the loop's default
+# executor (None). This avoids a hang at process exit where Python's
+# atexit handler (_python_exit) tries to join all ThreadPoolExecutor
+# worker threads from the loop's default executor, which may already
+# be in a bad state after the loop is closed.
+#
+# max_workers=None matches Python's default (min(32, cpu_count+4))
+# so there is zero performance difference vs the old behavior.
+import concurrent.futures as _futures
+
+_thread_pool = _futures.ThreadPoolExecutor(max_workers=None, thread_name_prefix="fenrir")
+
+def _shutdown_thread_pool():
+    """Shut down the module-level thread pool. Called at process exit."""
+    _thread_pool.shutdown(wait=False)
+
+import atexit as _atexit
+_atexit.register(_shutdown_thread_pool)
+
 if sys.version_info >= (3, 9):
-    to_thread = asyncio.to_thread
+    import contextvars
+    import functools as _functools
+
+    async def to_thread(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:  # type: ignore[misc]
+        ctx = contextvars.copy_context()
+        func_call = _functools.partial(func, *args, **kwargs)
+        return await asyncio.get_running_loop().run_in_executor(_thread_pool, ctx.run, func_call)
 else:
     import contextvars
     import functools
@@ -40,7 +66,7 @@ else:
         loop = asyncio.get_running_loop()
         ctx = contextvars.copy_context()
         func_call = functools.partial(func, *args, **kwargs)
-        return await loop.run_in_executor(None, ctx.run, func_call)
+        return await loop.run_in_executor(_thread_pool, ctx.run, func_call)
 
 
 
@@ -101,7 +127,7 @@ class WsgiToAsgi:
                     resp_iter.close()
             return body
 
-        response_body: bytes = await loop.run_in_executor(None, _run_wsgi)
+        response_body: bytes = await loop.run_in_executor(_thread_pool, _run_wsgi)
 
         # Send ASGI response
         await send(

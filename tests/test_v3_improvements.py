@@ -1,5 +1,5 @@
 """
-Tests covering previously unnoticed gaps and v4.1.1 improvements.
+Tests covering previously unnoticed gaps and v4.1.2 improvements.
 
 Covers:
   - PATCH/PUT/DELETE method routing

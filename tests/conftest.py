@@ -41,6 +41,12 @@ def pytest_sessionfinish(session, exitstatus):
                 asyncio.gather(*pending, return_exceptions=True)
             )
         
+        # Shut down the default executor before closing the loop
+        # This prevents the atexit handler from hanging on t.join()
+        executor = getattr(loop, '_default_executor', None)
+        if executor is not None:
+            executor.shutdown(wait=False)
+        
         # Close the loop
         if loop.is_running():
             loop.stop()

@@ -5,6 +5,7 @@ from http.cookies import SimpleCookie
 
 # Import orjson via fenrir.json
 from fenrir.json import _orjson, _HAS_ORJSON
+from fenrir.compat import _thread_pool
 
 class Response:
     def __init__(
@@ -365,7 +366,7 @@ class FileResponse(Response):
 
         with open(self._file_path, "rb") as f:
             while True:
-                chunk = await loop.run_in_executor(None, _read_chunk, f)
+                chunk = await loop.run_in_executor(_thread_pool, _read_chunk, f)
                 if not chunk:
                     break
                 yield chunk

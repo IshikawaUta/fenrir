@@ -4,6 +4,7 @@ import queue as _queue
 import threading
 from typing import Any, AsyncIterable, Union, Dict, Optional
 from fenrir.response import Response
+from fenrir.compat import _thread_pool
 
 logger = logging.getLogger("fenrir.sse")
 
@@ -61,7 +62,7 @@ class EventSourceResponse(Response):
                 t.start()
 
                 while True:
-                    item = await loop.run_in_executor(None, q.get)
+                    item = await loop.run_in_executor(_thread_pool, q.get)
                     if item is None:
                         break
                     formatted = self._format_event(item)

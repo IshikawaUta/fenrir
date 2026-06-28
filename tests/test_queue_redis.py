@@ -24,6 +24,7 @@ def fake_redis():
     r = fakeredis.aioredis.FakeRedis(server=server)
     yield r
     loop.close()
+    asyncio.set_event_loop(None)
 
 
 @pytest.fixture

@@ -81,7 +81,7 @@ class FenrirCoreMixin:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "4.1.1",
+        version: str = "4.1.2",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",

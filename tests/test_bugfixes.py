@@ -213,6 +213,7 @@ class TestORMExecutemanyTransaction:
 
         rows = await db.fetch_all("SELECT * FROM exec_items")
         assert len(rows) == 2
+        await db.disconnect()
 
 
 # ═══════════════════════════════════════════════════════════════════════

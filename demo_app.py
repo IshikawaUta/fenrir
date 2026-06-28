@@ -40,7 +40,7 @@ logger = logging.getLogger("demo")
 #   3. Program:   Fenrir(dev_mode=True) di bawah ini
 app = Fenrir(
     title="Fenrir Hybrid Framework Demo",
-    version="4.1.1",
+    version="4.1.2",
     dev_mode=os.getenv("FENRIR_DEV_MODE") == "1",
 )
 
