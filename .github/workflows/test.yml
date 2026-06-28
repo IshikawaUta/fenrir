@@ -31,4 +31,4 @@ jobs:
 
     - name: Run tests
       run: |
-        PYTHONPATH=. pytest -v
+        PYTHONPATH=. timeout 600 pytest -v --tb=short
