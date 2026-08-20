@@ -1,10 +1,9 @@
 """Fenrir vs FastAPI vs Flask vs Falcon vs Sanic - Benchmark Perbandingan"""
-import time
-import sys
 import asyncio
-import statistics
 import json
-import os
+import statistics
+import sys
+import time
 
 # ============================================================
 # Benchmark 1: Import Time
@@ -93,30 +92,35 @@ print("=" * 70)
 results_init = {}
 
 import fenrir
+
 start = time.perf_counter()
 app = fenrir.Fenrir(title='Benchmark')
 results_init['Fenrir'] = (time.perf_counter() - start) * 1000
 print(f"Fenrir:   {results_init['Fenrir']:.2f}ms")
 
 from fastapi import FastAPI as FastAPIApp
+
 start = time.perf_counter()
 app = FastAPIApp(title='Benchmark')
 results_init['FastAPI'] = (time.perf_counter() - start) * 1000
 print(f"FastAPI:  {results_init['FastAPI']:.2f}ms")
 
 from flask import Flask as FlaskApp
+
 start = time.perf_counter()
 app = FlaskApp(__name__)
 results_init['Flask'] = (time.perf_counter() - start) * 1000
 print(f"Flask:    {results_init['Flask']:.2f}ms")
 
 import falcon
+
 start = time.perf_counter()
 app = falcon.App()
 results_init['Falcon'] = (time.perf_counter() - start) * 1000
 print(f"Falcon:   {results_init['Falcon']:.2f}ms")
 
 from sanic import Sanic as SanicApp
+
 Sanic._app_registry.clear()
 start = time.perf_counter()
 app = SanicApp("Benchmark")
@@ -218,7 +222,7 @@ async def bench_fenrir():
     async def hello():
         return {'message': 'Hello, World!'}
 
-    @app.get('/users/{id}')
+    @app.get('/users/<id>')
     async def get_user(id: str):
         return {'user': id}
 
@@ -241,7 +245,7 @@ print(f"Fenrir:   {results_throughput['Fenrir']:.0f} req/s")
 # FastAPI
 async def bench_fastapi():
     from fastapi import FastAPI
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
 
     app = FastAPI(title='Benchmark')
 
@@ -271,7 +275,8 @@ print(f"FastAPI:  {results_throughput['FastAPI']:.0f} req/s")
 
 # Flask (sync, use test client)
 def bench_flask():
-    from flask import Flask, jsonify, request as flask_request
+    from flask import Flask, jsonify
+    from flask import request as flask_request
 
     app = Flask(__name__)
 
@@ -336,8 +341,8 @@ print(f"Falcon:   {results_throughput['Falcon']:.0f} req/s")
 # Sanic (async)
 async def bench_sanic():
     from sanic import Sanic
-    from sanic_testing import TestManager
     from sanic.response import json as sanic_json
+    from sanic_testing import TestManager
 
     Sanic._app_registry.clear()
     app = Sanic("Benchmark")
