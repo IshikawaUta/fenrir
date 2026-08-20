@@ -1,10 +1,11 @@
 """Targeted coverage tests for fenrir.dependencies internals."""
-from typing import Annotated, List
+from typing import List
 
 import pytest
 from pydantic import BaseModel
 
 import fenrir.dependencies as d
+from fenrir.compat import Annotated
 from fenrir.dependencies import (
     Body,
     Cookie,
