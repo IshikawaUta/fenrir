@@ -184,7 +184,7 @@ class TestParamKinds:
 class TestAnnotated:
     @pytest.mark.anyio
     async def test_annotated_no_marker(self):
-        async def h(x: Annotated[int, "doc"]):
+        async def h(x: Annotated[int, None]):
             ...
 
         resolved = await resolve_parameters(h, {}, StubReq(args={"x": "5"}), Response())
@@ -192,7 +192,7 @@ class TestAnnotated:
 
     @pytest.mark.anyio
     async def test_annotated_second_marker(self):
-        async def h(x: Annotated[int, "doc", Query()]):
+        async def h(x: Annotated[int, None, Query()]):
             ...
 
         resolved = await resolve_parameters(h, {}, StubReq(args={"x": "7"}), Response())
