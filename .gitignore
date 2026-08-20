@@ -70,6 +70,14 @@ venv.bak/
 # Fenrir monitoring data
 .fenrir_monitoring/
 
+# CodSpeed local benchmark artifacts
+.codspeed/
+
+# Local databases (may contain sensitive data)
+*.db
+*.sqlite
+*.sqlite3
+
 # IDE / Editors
 .vscode/
 .idea/
