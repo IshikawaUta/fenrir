@@ -16,8 +16,8 @@ from typing import Any, Callable, Dict, List
 
 try:
     from typing import Annotated
-except ImportError:  # pragma: no cover
-    pass  # type: ignore[assignment]
+except ImportError:  # pragma: no cover (Python < 3.9)
+    from typing_extensions import Annotated  # type: ignore[assignment]
 
 # get_origin / get_args: use typing_extensions so that Annotated from
 # typing_extensions is properly introspected on Python 3.8, where
