@@ -13,7 +13,12 @@ from fenrir.queue import Job, JobStatus, MemoryQueue, Queue, RedisQueue, Worker
 def redis_client():
     import fakeredis.aioredis
 
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    yield client
+    loop.close()
+    asyncio.set_event_loop(None)
 
 # ═══════════════════════════════════════════════════════════════════════
 # MemoryQueue internals

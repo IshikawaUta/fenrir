@@ -1,6 +1,6 @@
 """Unit tests for fenrir.openapi edge paths."""
 import sys
-from typing import Union
+from typing import Tuple, Union
 
 from pydantic import BaseModel
 
@@ -14,7 +14,7 @@ def test_annotation_primitives():
     assert _annotation_to_schema(float) == {"type": "number"}
     assert _annotation_to_schema(bool) == {"type": "boolean"}
     assert _annotation_to_schema(bytes) == {"type": "string", "format": "binary"}
-    assert _annotation_to_schema(tuple[int, str]) == {"type": "string"}
+    assert _annotation_to_schema(Tuple[int, str]) == {"type": "string"}
     assert _annotation_to_schema(inspect_parameter_empty()) == {"type": "string"}
 
 

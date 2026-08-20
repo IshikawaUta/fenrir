@@ -54,7 +54,17 @@ class StubRedisRaise:
 
 
 class TestSerializeFallbacks:
-    def test_orjson_serialize_unserializable(self):
+    def test_orjson_serialize_unserializable(self, monkeypatch):
+        import fenrir.cache as cmod
+
+        class _StubOrjson:
+            def dumps(self, value):
+                if isinstance(value, set):
+                    raise TypeError("cannot serialize set")
+                return b'{"_repr": "serialized", "_type": "dict"}'
+
+        monkeypatch.setattr(cmod, "_HAS_ORJSON", True)
+        monkeypatch.setattr(cmod, "_orjson", _StubOrjson())
         data = RedisCache._default_serialize({1, 2})
         assert b"_repr" in data
 
@@ -254,10 +264,10 @@ class TestFileCacheFallbacks:
 
     @pytest.mark.anyio
     async def test_exists_expired(self, tmp_path):
-        import orjson
+        import json
 
         fc = FileCache(cache_dir=str(tmp_path))
         path = fc._get_path("exp")
-        path.write_bytes(orjson.dumps({"value": 1, "expires_at": -999, "created_at": 0}))
+        path.write_bytes(json.dumps({"value": 1, "expires_at": -999, "created_at": 0}).encode())
         assert await fc.exists("exp") is False
         assert path.exists() is False

@@ -148,7 +148,22 @@ class TestDiscover:
             FakeEP("non", NonPlugin),
             FakeEP("bad", None, error=True),
         ]
-        monkeypatch.setattr(importlib.metadata, "entry_points", lambda group=None: eps)
+
+        class FakeGroups:
+            def __init__(self, entries):
+                self._entries = entries
+
+            def __iter__(self):
+                return iter(self._entries)
+
+            def get(self, group, default=None):
+                return self._entries
+
+        monkeypatch.setattr(
+            importlib.metadata,
+            "entry_points",
+            lambda group=None: FakeGroups(eps),
+        )
         reg = PluginRegistry(object())
         count = reg.discover()
         assert count == 1

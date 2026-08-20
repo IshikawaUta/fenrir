@@ -99,7 +99,7 @@ def test_json_helpers_stdlib(no_orjson):
 def test_json_fallback_import_without_orjson(monkeypatch):
     import importlib
 
-    import orjson as real_orjson
+    real_orjson = pytest.importorskip("orjson")
 
     import fenrir.json as j
 
