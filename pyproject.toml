@@ -4,14 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fenrir-framework"
-version = "4.1.2"
+version = "4.2.0"
 description = "A hybrid Python web framework combining Flask, FastAPI, Bottle, Falcon, and Sanic"
 readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "pydantic>=2.0.0",
     "jinja2>=3.0.0",
-    "asteri>=2.2.2",
+    "asteri>=3.0.0",
     "itsdangerous>=2.0.0",
     "python-multipart>=0.0.18",
     "typing_extensions>=4.0.0",
@@ -29,6 +35,7 @@ postgresql = ["asyncpg>=0.29.0"]
 orm = ["aiosqlite>=0.19.0", "asyncpg>=0.29.0"]
 graphql = ["strawberry-graphql>=0.200.0"]
 grpc = ["grpcio>=1.58.0", "grpcio-health-checking>=1.58.0"]
+testing = ["httpx>=0.23.0"]
 all = [
     "redis>=4.0.0",
     "aiosqlite>=0.19.0",
@@ -36,10 +43,84 @@ all = [
     "strawberry-graphql>=0.200.0",
     "grpcio>=1.58.0",
     "grpcio-health-checking>=1.58.0",
+    "httpx>=0.23.0",
 ]
 
 [tool.setuptools]
 packages = ["fenrir", "fenrir.monitoring"]
 
 [tool.setuptools.package-data]
-fenrir = ["logo.png", "logo.jpg"]
+fenrir = ["py.typed", "logo.png", "logo.jpg"]
+
+# ── Linting ────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+exclude = ["fenrir/bottle.py", "bottle_tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fenrir"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "B008",   # Depends()/File() in argument defaults is the FastAPI idiom
+    "B017",   # pytest.raises(Exception) is intentional in some tests
+    "B023",   # closures over loop vars are tested, not production logic
+    "B007",   # unused loop vars are harmless in tests
+    "E402",   # late imports in conftest/tests are intentional
+    "E731",   # assigning lambdas is convenient in tests
+    "E712",   # `is True` comparisons read clearly in tests
+    "F841",   # `_ = await call()` patterns are common in tests
+]
+"fenrir/compat.py" = ["E402", "F401"]
+"fenrir/performance.py" = ["E402", "E741"]
+"fenrir/cli.py" = ["W291", "W293"]  # trailing whitespace inside ASCII-art raw string
+
+# Root-level demo/benchmark scripts. benchmark.py intentionally times
+# framework imports mid-file (F401/F811/F811 redefinitions) and registers
+# many handlers in loops (F811); demo_app.py deliberately uses Depends()/
+# File() defaults and mid-file section imports.
+"benchmark.py" = ["E402", "F401", "F811", "F541"]
+"demo_app.py" = ["B008", "E402"]
+
+# ── Type checking ──────────────────────────────────────────────────────
+[tool.mypy]
+ignore_missing_imports = true
+# Fenrir is a mostly-untyped legacy codebase. These settings keep mypy strict
+# on annotated code while tolerating the legacy patterns (implicit Optional
+# defaults, dynamic attributes, cross-module monkey-patching):
+no_implicit_optional = false
+follow_imports = "skip"
+disable_error_code = ["var-annotated", "annotation-unchecked"]
+exclude = ["fenrir/bottle.py", "bottle_tests", "tests/benchmarks"]
+
+# The vendored bottle.py is legacy third-party code — never type-check it.
+[[tool.mypy.overrides]]
+module = "fenrir.bottle"
+ignore_errors = true
+
+# Dependency-injection and OpenAPI coverage tests intentionally use FastAPI-style
+# sentinel defaults (Depends()/Header()/Body()/...) and unresolved forward refs,
+# which mypy cannot type-check. Keep the rest of the tests checked.
+[[tool.mypy.overrides]]
+module = ["test_dependencies_coverage", "test_openapi_coverage"]
+ignore_errors = true
+
+# ── Coverage ───────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["fenrir"]
+branch = true
+omit = ["fenrir/bottle.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == \"__main__\":",
+]
+skip_covered = true

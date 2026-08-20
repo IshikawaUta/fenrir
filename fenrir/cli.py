@@ -1,10 +1,12 @@
 import argparse
-import sys
-import os
-import time
 import asyncio
+import os
+import sys
+import time
 from typing import Any
+
 from fenrir import __version__
+
 
 def print_banner(app_title: str = None):
     """Print the bold blue Fenrir ASCII banner."""
@@ -38,13 +40,13 @@ def format_col(text: str, width: int, color_code: str = "") -> str:
 def load_app(target: str) -> Any:
     """Load application object from target string (e.g. 'demo_app:app' or 'app.py')."""
     import importlib.util
-    
+
     app_name = "app"
     if ":" in target:
         path_part, app_name = target.split(":", 1)
     else:
         path_part = target
-        
+
     # Check if path_part is a python file
     if path_part.endswith(".py") and os.path.exists(path_part):
         spec = importlib.util.spec_from_file_location("fenrir_cli_target", path_part)
@@ -63,30 +65,30 @@ def load_app(target: str) -> Any:
             if os.path.exists(py_file):
                 spec = importlib.util.spec_from_file_location("fenrir_cli_target", py_file)
                 if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not load spec for file '{py_file}'")
+                    raise ImportError(f"Could not load spec for file '{py_file}'") from None
                 module = importlib.util.module_from_spec(spec)
                 sys.path.insert(0, os.path.dirname(os.path.abspath(py_file)))
                 sys.modules["fenrir_cli_target"] = module
                 spec.loader.exec_module(module)
             else:
-                raise ImportError(f"Could not import module '{path_part}': {e}")
-                
+                raise ImportError(f"Could not import module '{path_part}': {e}") from e
+
     try:
         return getattr(module, app_name)
     except AttributeError:
         if app_name == "app":
             try:
-                return getattr(module, "application")
+                return module.application
             except AttributeError:
                 pass
-        raise AttributeError(f"Module '{path_part}' has no attribute '{app_name}'")
+        raise AttributeError(f"Module '{path_part}' has no attribute '{app_name}'") from None
 
 
 def run_with_reloader(target_func, interval=1.0):
     """Run a target function in a separate process, and restart it when .py files change."""
     import multiprocessing
     import time
-    
+
     def get_py_files():
         py_files = []
         for root, _, filenames in os.walk("."):
@@ -106,20 +108,20 @@ def run_with_reloader(target_func, interval=1.0):
 
     files = get_py_files()
     mtimes = get_mtimes(files)
-    
+
     print("\033[94mAuto-reload enabled (fallback polling/mtime)...\033[0m")
-    
+
     p = multiprocessing.Process(target=target_func)
     p.start()
-    
+
     try:
         while True:
             time.sleep(interval)
-            
+
             # Check if files changed
             current_files = get_py_files()
             current_mtimes = get_mtimes(current_files)
-            
+
             changed = False
             if set(current_files) != set(files):
                 changed = True
@@ -128,17 +130,17 @@ def run_with_reloader(target_func, interval=1.0):
                     if current_mtimes.get(f) != mtimes.get(f):
                         changed = True
                         break
-                        
+
             if changed:
                 print("\033[33mChange detected! Restarting server...\033[0m")
                 # Kill old process
                 p.terminate()
                 p.join()
-                
+
                 # Start new process
                 p = multiprocessing.Process(target=target_func)
                 p.start()
-                
+
                 files = current_files
                 mtimes = current_mtimes
     except KeyboardInterrupt:
@@ -150,21 +152,21 @@ def cmd_run(args):
     """Run command handler."""
     reload_mode = args.dev or args.reload
     app = load_app(args.target)
-    
+
     if args.dev:
         os.environ["FENRIR_DEV_MODE"] = "1"
         app.dev_mode = True
         if hasattr(app, "config"):
             app.config["DEBUG"] = True
-    
+
     # Print our beautiful blue banner
     print_banner(app.title)
     print(f"\033[94mStarting Fenrir App '{app.title}' v{app.version}...\033[0m")
-    
+
     try:
         from asteri.arbiter import Arbiter
         from asteri.workers.asgi import ASGIWorker
-        
+
         arbiter = Arbiter(
             app_path=args.target,
             worker_class=ASGIWorker,
@@ -187,21 +189,21 @@ def cmd_routes(args):
     """Routes command handler."""
     app = load_app(args.target)
     print_banner(app.title)
-    
+
     routes = app.router.routes
     websocket_routes = getattr(app.router, "websocket_routes", [])
-    
+
     if not routes and not websocket_routes:
         print("\033[33mNo routes registered.\033[0m")
         return
-        
+
     headers = ["Path", "Methods", "Handler", "Blueprint"]
     rows = []
-    
+
     for route in routes:
         blueprint = app._route_blueprints.get(route)
         bp_name = blueprint.name if blueprint else "-"
-        
+
         if route.is_falcon_resource():
             handler_name = route.handler.__class__.__name__
             methods = []
@@ -212,18 +214,18 @@ def cmd_routes(args):
         else:
             handler_name = getattr(route.handler, "__name__", str(route.handler))
             methods_str = ", ".join(sorted(route.methods))
-            
+
         rows.append((route.path_pattern, methods_str, handler_name, bp_name))
-        
+
     for route in websocket_routes:
         blueprint = app._route_blueprints.get(route)
         bp_name = blueprint.name if blueprint else "-"
         handler_name = getattr(route.handler, "__name__", str(route.handler))
         rows.append((route.path_pattern, "WEBSOCKET", handler_name, bp_name))
-        
+
     col_widths = [max(len(str(r[i])) for r in [headers] + rows) for i in range(4)]
     separator = "\033[94m" + "-" * (sum(col_widths) + 6) + "\033[0m"
-    
+
     print(separator)
     header_cols = [format_col(headers[i], col_widths[i], "\033[1;34m") for i in range(4)]
     print("\033[94m  \033[0m".join(header_cols))
@@ -231,12 +233,12 @@ def cmd_routes(args):
     for row in rows:
         path, methods, handler, bp = row
         method_color = "\033[96m" if methods == "WEBSOCKET" else "\033[92m"
-        
+
         col_path = format_col(path, col_widths[0], "\033[36m")
         col_methods = format_col(methods, col_widths[1], method_color)
         col_handler = format_col(handler, col_widths[2], "")
         col_bp = format_col(bp, col_widths[3], "")
-        
+
         print("\033[94m  \033[0m".join([col_path, col_methods, col_handler, col_bp]))
     print(separator)
 
@@ -245,10 +247,11 @@ def cmd_shell(args):
     """Shell command handler."""
     app = load_app(args.target)
     print_banner(app.title)
-    
+
     import code
-    from fenrir import request, g, Response, JSONResponse, HTMLResponse, Blueprint
-    
+
+    from fenrir import Blueprint, HTMLResponse, JSONResponse, Response, g, request
+
     banner = (
         f"\033[1;34mFenrir {__version__} Interactive Shell\033[0m\n"
         f"\033[94mApp: {app.title} [{app.openapi_url}]\033[0m\n"
@@ -268,45 +271,56 @@ def cmd_shell(args):
 
 async def run_benchmark(app, path: str, method: str, iterations: int, trials: int):
     """Perform in-memory benchmark using HTTPX ASGITransport."""
-    try:
-        import httpx
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("httpx") is None:
         print("\033[31mHTTPX is required for benchmarking. Install it with: pip install httpx\033[0m")
         sys.exit(1)
-        
+
     print(f"\033[94mBenchmarking {method} {path} ({iterations} iterations x {trials} trials)...\033[0m")
-    
+
+    # Silence noisy INFO logs from the app's middleware/handlers and httpx so
+    # the benchmark output stays clean. Restore afterwards.
+    import logging
+    logging.disable(logging.INFO)
+    try:
+        return await _benchmark_requests(app, path, method, iterations, trials)
+    finally:
+        logging.disable(logging.NOTSET)
+
+
+async def _benchmark_requests(app, path, method, iterations, trials):
+    import httpx
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://benchmark") as client:
         # Warmup
         print("\033[94mWarming up pipeline...\033[0m")
         for _ in range(50):
             await client.request(method, path)
-            
+
         print("\033[94mRunning trials...\033[0m")
         all_trials_rps = []
         all_latencies = []
-        
+
         for t in range(1, trials + 1):
             start_time = time.perf_counter()
             trial_latencies = []
-            
+
             for _ in range(iterations):
                 req_start = time.perf_counter()
                 await client.request(method, path)
                 trial_latencies.append(time.perf_counter() - req_start)
-                
+
             elapsed = time.perf_counter() - start_time
             rps = iterations / elapsed
             all_trials_rps.append(rps)
             all_latencies.extend(trial_latencies)
             print(f"  \033[36mTrial {t}:\033[0m \033[92m{rps:.2f} rps\033[0m (elapsed: {elapsed:.3f}s)")
-            
+
         avg_rps = sum(all_trials_rps) / len(all_trials_rps)
         avg_latency_ms = (sum(all_latencies) / len(all_latencies)) * 1000
         min_latency_ms = min(all_latencies) * 1000
         max_latency_ms = max(all_latencies) * 1000
-        
+
         print("\n\033[1;34m" + "="*40)
         print("FENRIR BENCHMARK RESULTS")
         print("="*40 + "\033[0m")
@@ -332,35 +346,35 @@ def cmd_new(args):
     if os.path.exists(project_dir):
         print(f"\033[31mError: Directory '{project_dir}' already exists.\033[0m")
         sys.exit(1)
-        
+
     print(f"\033[94mScaffolding a new Fenrir project '{project_dir}'...\033[0m")
-    
+
     import shutil
     try:
         os.makedirs(project_dir, exist_ok=True)
         os.makedirs(os.path.join(project_dir, "static"), exist_ok=True)
         os.makedirs(os.path.join(project_dir, "templates"), exist_ok=True)
-        
+
         # Copy logo.png and create favicon.ico from logo.jpg (if it exists)
         # First try from fenrir package directory (for installed packages)
         fenrir_dir = os.path.dirname(os.path.abspath(__file__))
         core_logo_path = os.path.join(fenrir_dir, "logo.png")
-        
+
         # Fallback to parent directory if not in fenrir folder (for dev mode)
         if not os.path.exists(core_logo_path):
             core_logo_path = os.path.join(os.path.dirname(fenrir_dir), "logo.png")
-        
+
         # Last fallback to current working directory
         if not os.path.exists(core_logo_path):
             core_logo_path = os.path.join(os.getcwd(), "logo.png")
-            
+
         if os.path.exists(core_logo_path):
             shutil.copy(core_logo_path, os.path.join(project_dir, "logo.png"))
 
         core_jpg_path = os.path.join(fenrir_dir, "logo.jpg")
         if not os.path.exists(core_jpg_path):
             core_jpg_path = os.path.join(os.path.dirname(fenrir_dir), "logo.jpg")
-        
+
         if not os.path.exists(core_jpg_path):
             core_jpg_path = os.path.join(os.getcwd(), "logo.jpg")
 
@@ -368,13 +382,13 @@ def cmd_new(args):
             shutil.copy(core_jpg_path, os.path.join(project_dir, "favicon.ico"))
         elif os.path.exists(core_logo_path):
             shutil.copy(core_logo_path, os.path.join(project_dir, "favicon.ico"))
-        
+
         # Write app.py
         app_content = """from fenrir import Fenrir, render_template, send_file
 import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="4.1.2")
+app = Fenrir(title="My Fenrir Application", version="4.2.0")
 
 @app.get("/")
 async def home():
@@ -399,7 +413,7 @@ if __name__ == "__main__":
 """
         with open(os.path.join(project_dir, "app.py"), "w") as f:
             f.write(app_content)
-            
+
         # Write templates/index.html
         index_content = """<!DOCTYPE html>
 <html lang="en">
@@ -681,7 +695,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v4.1.2</span>
+                <span class="info-value">Fenrir v4.2.0</span>
             </div>
         </div>
 
@@ -703,16 +717,16 @@ if __name__ == "__main__":
 """
         with open(os.path.join(project_dir, "templates", "index.html"), "w") as f:
             f.write(index_content)
-            
+
         # Write a dummy requirements.txt
         req_content = "fenrir\n"
         with open(os.path.join(project_dir, "requirements.txt"), "w") as f:
             f.write(req_content)
-            
+
         # Write dummy static file
         with open(os.path.join(project_dir, "static", "style.css"), "w") as f:
             f.write("body { font-family: sans-serif; background-color: #f0f4f8; color: #102a43; }")
-            
+
         print(f"\033[92mSuccess! Project '{project_dir}' initialized.\033[0m\n")
         print("\033[36mTo get started:\033[0m")
         print(f"  cd {project_dir}")
@@ -728,9 +742,9 @@ def _update_env_var(key: str, value: str):
     env_file = os.path.join(os.getcwd(), ".env")
     lines = []
     found = False
-    
+
     if os.path.exists(env_file):
-        with open(env_file, "r") as f:
+        with open(env_file) as f:
             for line in f:
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#") and stripped.split("=", 1)[0] == key:
@@ -738,10 +752,10 @@ def _update_env_var(key: str, value: str):
                     found = True
                 else:
                     lines.append(line)
-    
+
     if not found:
         lines.append(f"{key}={value}\n")
-    
+
     # Atomic write: write to temp file, then rename
     dir_name = os.path.dirname(env_file) or "."
     with tempfile.NamedTemporaryFile(mode="w", dir=dir_name, delete=False) as tmp:
@@ -753,7 +767,7 @@ def _update_env_var(key: str, value: str):
 def cmd_monitoring(args):
     """Monitoring enable/disable/status command handler."""
     print_banner("Fenrir Monitoring")
-    
+
     if args.monitoring_action == "enable":
         _update_env_var("MONITORING_ENABLED", "true")
         print("\033[92mMonitoring dashboard enabled.\033[0m")
@@ -762,29 +776,29 @@ def cmd_monitoring(args):
         print("  MONITORING_PASSWORD=changeme")
         print("  MONITORING_SECRET_KEY=<random-secret>")
         print("\n\033[36mRestart your server to apply changes.\033[0m")
-        
+
     elif args.monitoring_action == "disable":
         _update_env_var("MONITORING_ENABLED", "false")
         print("\033[33mMonitoring dashboard disabled.\033[0m")
         print("\033[36mRestart your server to apply changes.\033[0m")
-        
+
     elif args.monitoring_action == "status":
         try:
             from dotenv import load_dotenv
             load_dotenv(os.path.join(os.getcwd(), ".env"))
         except ImportError:
             pass
-        
+
         enabled = os.getenv("MONITORING_ENABLED", "false").lower() == "true"
         user = os.getenv("MONITORING_USER", "admin")
         sites = os.getenv("MONITORING_SITES", "http://localhost:8000")
-        
+
         status_color = "\033[92mENABLED\033[0m" if enabled else "\033[33mDISABLED\033[0m"
         print(f"\033[36mStatus:\033[0m    {status_color}")
         print(f"\033[36mUser:\033[0m      {user}")
         print(f"\033[36mSites:\033[0m     {sites}")
-        print(f"\033[36mEndpoint:\033[0m  /monitoring")
-        
+        print("\033[36mEndpoint:\033[0m  /monitoring")
+
     elif args.monitoring_action == "set-password":
         import getpass
         password = getpass.getpass("\033[36mEnter new monitoring password:\033[0m ")
@@ -792,11 +806,11 @@ def cmd_monitoring(args):
             print("\033[31mPassword cannot be empty.\033[0m")
             return
         _update_env_var("MONITORING_PASSWORD", password)
-        
+
         import secrets
         secret_key = secrets.token_hex(32)
         _update_env_var("MONITORING_SECRET_KEY", secret_key)
-        
+
         print("\033[92mPassword updated successfully.\033[0m")
         print("\033[36mRestart your server to apply changes.\033[0m")
 
@@ -809,12 +823,12 @@ def cmd_info(args):
             app = load_app(args.target)
         except Exception as e:
             print(f"\033[31mWarning: Could not load target '{args.target}': {e}\033[0m\n")
-            
+
     print_banner(app.title if app else None)
-    
+
     import platform
     import sys as sys_module
-    
+
     print("\033[1;34m" + "="*45)
     print("SYSTEM ENVIRONMENT")
     print("="*45 + "\033[0m")
@@ -822,7 +836,7 @@ def cmd_info(args):
     print(f"\033[36mPython version:\033[0m      {platform.python_version()}")
     print(f"\033[36mPython executable:\033[0m   {sys_module.executable}")
     print(f"\033[36mOS Platform:\033[0m         {platform.system()} {platform.release()}")
-    
+
     # Check dependencies/compatibilities dynamically
     has_pydantic = "No"
     try:
@@ -834,7 +848,7 @@ def cmd_info(args):
             has_pydantic += f" (v{pydantic.VERSION})"
     except ImportError:
         pass
-        
+
     has_asteri = "No"
     try:
         import asteri
@@ -845,27 +859,27 @@ def cmd_info(args):
             has_asteri += f" (v{asteri.VERSION})"
     except ImportError:
         pass
-        
+
     print(f"\033[36mPydantic installed:\033[0m  {has_pydantic}")
     print(f"\033[36mAsteri installed:\033[0m    {has_asteri}")
-    
+
     if app:
         print("\033[1;34m" + "="*45)
         print("APPLICATION DETAILS")
         print("="*45 + "\033[0m")
         print(f"\033[36mApp Title:\033[0m           {app.title}")
         print(f"\033[36mApp Version:\033[0m         {app.version}")
-        
+
         routes_count = len(app.router.routes)
         ws_count = len(getattr(app.router, "websocket_routes", []))
         mw_count = len(app.middleware_stack) if hasattr(app, "middleware_stack") else 0
         if not mw_count and hasattr(app, "_asgi_middlewares"):
             mw_count = len(app._asgi_middlewares)
-            
+
         print(f"\033[36mHTTP Routes:\033[0m         {routes_count}")
         print(f"\033[36mWebSocket Routes:\033[0m    {ws_count}")
         print(f"\033[36mMiddlewares:\033[0m         {mw_count}")
-        
+
         # Compat status
         compat_layers = []
         if "flask" in sys_module.modules:
@@ -878,10 +892,10 @@ def cmd_info(args):
             compat_layers.append("Falcon")
         if "sanic" in sys_module.modules:
             compat_layers.append("Sanic")
-            
+
         compat_str = ", ".join(compat_layers) if compat_layers else "None active in process"
         print(f"\033[36mCompat Layers Active:\033[0m {compat_str}")
-        
+
     print("\033[1;34m" + "="*45 + "\033[0m")
 
 
@@ -890,7 +904,7 @@ def main():
         description="Fenrir CLI - The hybrid web framework command line interface.",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    
+
     ascii_art = r"""
  ____  ____  __ _  ____  __  ____ 
 (  __)(  __)(  ( \(  _ \(  )(  _ \
@@ -898,16 +912,16 @@ def main():
 (__)  (____)\_)__)(__\_)(__)(__\_)
 """
     version_str = f"\033[1;34m{ascii_art}\033[0m\n\033[94mFenrir Web Framework - Version {__version__}\033[0m"
-    
+
     parser.add_argument(
         "-v", "--version",
         action="version",
         version=version_str,
         help="Show Fenrir framework version and exit."
     )
-    
+
     subparsers = parser.add_subparsers(title="subcommands", dest="command", required=True)
-    
+
     # 1. Run subcommand
     run_parser = subparsers.add_parser("run", help="Run a Fenrir development or production server.")
     run_parser.add_argument("target", help="The app path in format 'module:app' or 'app.py'.")
@@ -918,17 +932,17 @@ def main():
     run_parser.add_argument("--reload", action="store_true", help="Restart workers on code changes.")
     run_parser.add_argument("--disable-dashboard", action="store_true", help="Disable Asteri built-in dashboard (/asteri-status)")
     run_parser.set_defaults(func=cmd_run)
-    
+
     # 2. Routes subcommand
     routes_parser = subparsers.add_parser("routes", help="Show all registered routes for the app.")
     routes_parser.add_argument("target", help="The app path in format 'module:app' or 'app.py'.")
     routes_parser.set_defaults(func=cmd_routes)
-    
+
     # 3. Shell subcommand
     shell_parser = subparsers.add_parser("shell", help="Run a Python shell in the app context.")
     shell_parser.add_argument("target", help="The app path in format 'module:app' or 'app.py'.")
     shell_parser.set_defaults(func=cmd_shell)
-    
+
     # 4. Bench subcommand
     bench_parser = subparsers.add_parser("bench", help="Run in-memory framework speed benchmark.")
     bench_parser.add_argument("target", help="The app path in format 'module:app' or 'app.py'.")
@@ -937,28 +951,28 @@ def main():
     bench_parser.add_argument("-p", "--path", default="/", help="The HTTP path to query [default: /]")
     bench_parser.add_argument("-m", "--method", default="GET", help="The HTTP method to use [default: GET]")
     bench_parser.set_defaults(func=cmd_bench)
-    
+
     # 5. New subcommand
     new_parser = subparsers.add_parser("new", help="Scaffold a new Fenrir project directory.")
     new_parser.add_argument("name", help="Name of the new project directory.")
     new_parser.set_defaults(func=cmd_new)
-    
+
     # 6. Info subcommand
     info_parser = subparsers.add_parser("info", help="Display environment, dependency status, and application details.")
     info_parser.add_argument("target", nargs="?", default=None, help="Optional app path in format 'module:app' or 'app.py'.")
     info_parser.set_defaults(func=cmd_info)
-    
+
     # 7. Monitoring subcommand
     monitoring_parser = subparsers.add_parser("monitoring", help="Manage the built-in monitoring dashboard.")
     monitoring_sub = monitoring_parser.add_subparsers(dest="monitoring_action", required=True)
-    
+
     monitoring_sub.add_parser("enable", help="Enable the monitoring dashboard.")
     monitoring_sub.add_parser("disable", help="Disable the monitoring dashboard.")
     monitoring_sub.add_parser("status", help="Show monitoring configuration status.")
     monitoring_sub.add_parser("set-password", help="Set a new monitoring dashboard password.")
-    
+
     monitoring_parser.set_defaults(func=cmd_monitoring)
-    
+
     args = parser.parse_args()
     args.func(args)
 

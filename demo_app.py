@@ -1,26 +1,28 @@
-import os
 import logging
+import os
+
 from pydantic import BaseModel
+
 from fenrir import (
-    Fenrir,
     Blueprint,
-    request,
-    g,
     Depends,
-    Query,
+    Fenrir,
     Header,
-    render_template,
-    Response,
     HTTPBadRequest,
-    HTTPUnauthorized,
-    HTTPForbidden,
-    HTTPNotFound,
     HTTPConflict,
-    HTTPUnprocessableEntity,
+    HTTPForbidden,
     HTTPInternalServerError,
+    HTTPNotFound,
+    HTTPUnauthorized,
+    HTTPUnprocessableEntity,
+    Query,
+    Response,
+    g,
+    render_template,
+    request,
 )
-from fenrir.response import JSONResponse
 from fenrir.features import init_fenrir_monitoring
+from fenrir.response import JSONResponse
 
 # Load environment variables from .env file
 try:
@@ -40,8 +42,11 @@ logger = logging.getLogger("demo")
 #   3. Program:   Fenrir(dev_mode=True) di bawah ini
 app = Fenrir(
     title="Fenrir Hybrid Framework Demo",
-    version="4.1.2",
+    version="4.2.0",
     dev_mode=os.getenv("FENRIR_DEV_MODE") == "1",
+    # The demo intentionally shows the interactive docs; production apps get
+    # them disabled by default (ENV=production) unless docs_enabled=True.
+    docs_enabled=True,
 )
 
 # --- Enable Built-in Features ---
@@ -71,20 +76,24 @@ async def home():
 
 @app.get("/logo.png")
 async def get_logo():
-    from fenrir import send_file
     import os
+
+    from fenrir import send_file
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return send_file(os.path.join(base_dir, "logo.png"))
 
 @app.get("/favicon.ico")
 async def get_favicon():
-    from fenrir import send_file
     import os
+
+    from fenrir import send_file
     base_dir = os.path.dirname(os.path.abspath(__file__))
     return send_file(os.path.join(base_dir, "logo.jpg"))
 
 # Form & File Upload Endpoint
-from fenrir import Form, File, UploadFile
+from fenrir import File, Form, UploadFile
+
+
 @app.post("/upload")
 async def handle_upload(
     title: str = Form(),
@@ -100,6 +109,8 @@ async def handle_upload(
 
 # WebSocket Echo Endpoint
 from fenrir import WebSocket, WebSocketDisconnect
+
+
 @app.websocket("/ws/chat")
 async def chat_ws(ws: WebSocket):
     await ws.accept()
@@ -320,7 +331,7 @@ async def err_middleware():
 # --- 7. Bottle-style Built-in Server Runner (runs programmatically via Asteri) ---
 if __name__ == "__main__":
     monitoring_enabled = os.getenv("MONITORING_ENABLED", "false").lower() == "true"
-    
+
     logger.info("Starting Fenrir Web Application...")
     logger.info(f"  Monitoring: {'ENABLED at /monitoring' if monitoring_enabled else 'DISABLED (run: fenrir monitoring enable)'}")
     logger.info("")
@@ -330,5 +341,5 @@ if __name__ == "__main__":
     logger.info("  fenrir monitoring set-password - Set dashboard password")
     logger.info("  fenrir run app --disable-dashboard - Disable Asteri built-in dashboard")
     logger.info("")
-    
+
     app.run(host="127.0.0.1", port=8000, workers=2, app_path="demo_app:app")
