@@ -1,6 +1,7 @@
 import inspect
 from typing import Any, List, Optional
 
+
 class View:
     methods: Optional[List[str]] = None
     provide_automatic_options: Optional[bool] = None
@@ -20,7 +21,7 @@ class View:
         view.__name__ = name
         view.__doc__ = cls.__doc__
         view.__module__ = cls.__module__
-        
+
         methods = cls.methods
         if methods is None:
             methods = []
@@ -30,14 +31,14 @@ class View:
             if not methods:
                 methods = ["GET"]
 
-        view.methods = methods
-        view.provide_automatic_options = cls.provide_automatic_options
+        view.methods = methods  # type: ignore[attr-defined]
+        view.provide_automatic_options = cls.provide_automatic_options  # type: ignore[attr-defined]
         return view
 
 
 class MethodView(View):
     async def dispatch_request(self, *args: Any, **kwargs: Any) -> Any:
-        from fenrir.context import _request_ctx_var, _app_ctx_var
+        from fenrir.context import _request_ctx_var
         from fenrir.dependencies import resolve_parameters
 
         # Get request from the ASGI context
@@ -64,15 +65,9 @@ class MethodView(View):
             return Response(b"", status=200, headers={"allow": ", ".join(sorted(allowed))})
         if meth is None:
             from fenrir.exceptions import HTTPMethodNotAllowed
-            raise HTTPMethodNotAllowed(method=method)
+            raise HTTPMethodNotAllowed()
 
         if req is not None:
-            # Get app from context to access router for path param extraction
-            try:
-                app = _app_ctx_var.get()
-            except LookupError:
-                app = None
-
             path_params = getattr(req, "path_params", {})
 
             from fenrir.response import Response as _Resp

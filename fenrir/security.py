@@ -1,7 +1,9 @@
 import base64
 from typing import Any, Dict, Optional, Tuple
+
 from fenrir.exceptions import HTTPException
 from fenrir.request import Request
+
 
 class SecurityBase:
     def __init__(
@@ -229,7 +231,7 @@ class HTTPBasic(HTTPBase):
             return username, password
         except Exception:
             if self.auto_error:
-                raise HTTPException(status_code=401, detail="Invalid credentials")
+                raise HTTPException(status_code=401, detail="Invalid credentials") from None
             return None
 
 
@@ -281,7 +283,7 @@ class HTTPDigest(HTTPBase):
             auto_error=auto_error,
         )
 
-    async def __call__(self, request: Request) -> Optional[str]:
+    async def __call__(self, request: Request) -> Optional[Dict[str, str]]:
         auth = request.headers.get("authorization")
         if not auth:
             if self.auto_error:

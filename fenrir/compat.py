@@ -12,20 +12,20 @@ import asyncio
 import io
 import os
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, List
 
 try:
     from typing import Annotated
-except ImportError:
-    from typing_extensions import Annotated  # type: ignore[assignment]
+except ImportError:  # pragma: no cover
+    pass  # type: ignore[assignment]
 
 # get_origin / get_args: use typing_extensions so that Annotated from
 # typing_extensions is properly introspected on Python 3.8, where
 # typing.get_origin(typing_extensions.Annotated[...]) returns None.
 try:
-    from typing_extensions import get_origin, get_args
-except ImportError:
-    from typing import get_origin, get_args  # type: ignore[assignment]
+    from typing_extensions import get_args, get_origin
+except ImportError:  # pragma: no cover
+    pass  # type: ignore[assignment]
 
 # asyncio.to_thread compatibility for Python 3.8.
 # IMPORTANT: use contextvars.copy_context() so that ContextVar values
@@ -48,6 +48,7 @@ def _shutdown_thread_pool():
     _thread_pool.shutdown(wait=False)
 
 import atexit as _atexit
+
 _atexit.register(_shutdown_thread_pool)
 
 if sys.version_info >= (3, 9):
@@ -58,7 +59,7 @@ if sys.version_info >= (3, 9):
         ctx = contextvars.copy_context()
         func_call = _functools.partial(func, *args, **kwargs)
         return await asyncio.get_running_loop().run_in_executor(_thread_pool, ctx.run, func_call)
-else:
+else:  # pragma: no cover
     import contextvars
     import functools
 

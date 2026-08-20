@@ -40,24 +40,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
-import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import (
     Any,
-    Callable,
     Dict,
     Generator,
     List,
     Optional,
-    Sequence,
     Tuple,
-    Type,
-    Union,
 )
 
-from fenrir.json import _orjson, _HAS_ORJSON
+from fenrir.json import _HAS_ORJSON, _orjson
 
 logger = logging.getLogger("fenrir.orm")
 
@@ -87,7 +81,7 @@ class Field:
         self.name = ""
         self.model_class: Optional[type] = None
 
-    def contribute_to_class(self, model_class: type, name: str) -> None:
+    def contribute_to_class(self, model_class: Optional[type], name: str) -> None:
         self.name = name
         self.model_class = model_class
         if not self.column_name:
@@ -283,7 +277,7 @@ _OPERATOR_INVERT = {
 class QuerySet:
     """Lazy query builder for Model operations."""
 
-    def __init__(self, model_class: type, db: "Database") -> None:
+    def __init__(self, model_class: Any, db: Database) -> None:
         self.model_class = model_class
         self.db = db
         self._filters: List[Tuple[str, str, Any]] = []
@@ -291,7 +285,7 @@ class QuerySet:
         self._limit: Optional[int] = None
         self._offset: Optional[int] = None
 
-    def _clone(self) -> "QuerySet":
+    def _clone(self) -> QuerySet:
         qs = QuerySet(self.model_class, self.db)
         qs._filters = list(self._filters)
         qs._order = list(self._order)
@@ -299,7 +293,7 @@ class QuerySet:
         qs._offset = self._offset
         return qs
 
-    def filter(self, **kwargs: Any) -> "QuerySet":
+    def filter(self, **kwargs: Any) -> QuerySet:
         qs = self._clone()
         valid_fields = set(self.model_class._meta["fields"].keys())
         for key, value in kwargs.items():
@@ -312,7 +306,7 @@ class QuerySet:
             qs._filters.append((field_name, op, value))
         return qs
 
-    def exclude(self, **kwargs: Any) -> "QuerySet":
+    def exclude(self, **kwargs: Any) -> QuerySet:
         qs = self._clone()
         valid_fields = set(self.model_class._meta["fields"].keys())
         for key, value in kwargs.items():
@@ -327,17 +321,17 @@ class QuerySet:
             qs._filters.append((field_name, op, value))
         return qs
 
-    def order_by(self, *fields: str) -> "QuerySet":
+    def order_by(self, *fields: str) -> QuerySet:
         qs = self._clone()
         qs._order = list(fields)
         return qs
 
-    def limit(self, n: int) -> "QuerySet":
+    def limit(self, n: int) -> QuerySet:
         qs = self._clone()
         qs._limit = n
         return qs
 
-    def offset(self, n: int) -> "QuerySet":
+    def offset(self, n: int) -> QuerySet:
         qs = self._clone()
         qs._offset = n
         return qs
@@ -519,7 +513,10 @@ class QuerySet:
             if field_name not in valid_fields:
                 raise ValueError(f"Invalid field name: {field_name}")
             field_obj = self.model_class._meta["fields"].get(field_name)
-            col_name = getattr(field_obj, "column_name", None) or field_name if field_obj else field_name
+            if field_obj is not None:
+                col_name = getattr(field_obj, "column_name", None) or field_name
+            else:
+                col_name = field_name
             if field_obj:
                 value = field_obj.to_db(value)
             set_parts.append(f"{col_name} = ?")
@@ -536,7 +533,7 @@ class QuerySet:
 class ModelMeta(type):
     """Metaclass for Model that collects fields."""
 
-    def __new__(mcs, name: str, bases: tuple, namespace: dict) -> "ModelMeta":
+    def __new__(mcs, name: str, bases: tuple, namespace: dict) -> ModelMeta:
         if name == "Model":
             return super().__new__(mcs, name, bases, namespace)
 
@@ -599,7 +596,7 @@ class Model(metaclass=ModelMeta):
     """
 
     _meta: Dict[str, Any] = {"fields": {}, "tablename": "", "primary_key": None}
-    _db: Optional["Database"] = None
+    _db: Optional[Database] = None
 
     def __init__(self, **kwargs: Any) -> None:
         meta = self._meta
@@ -615,12 +612,12 @@ class Model(metaclass=ModelMeta):
             setattr(self, fname, value)
 
         # Warn about unknown kwargs
-        for key, value in kwargs.items():
+        for key in kwargs:
             if key not in meta["fields"]:
                 raise TypeError(f"__init__() got an unexpected keyword argument '{key}' for {type(self).__name__}")
 
     @classmethod
-    def _from_row(cls, row: Any) -> "Model":
+    def _from_row(cls, row: Any) -> Model:
         """Create a model instance from a database row."""
         data = {}
         field_index = cls._meta["field_index_map"]
@@ -644,7 +641,7 @@ class Model(metaclass=ModelMeta):
             if isinstance(value, datetime):
                 value = value.isoformat()
             elif hasattr(value, "isoformat"):
-                value = value.isoformat()
+                value = value.isoformat()  # type: ignore[union-attr]
             result[fname] = value
         return result
 
@@ -662,6 +659,7 @@ class Model(metaclass=ModelMeta):
             await self._update()
 
     async def _insert(self) -> None:
+        assert self._db is not None, "Model not bound to a database"
         meta = self._meta
         fields_list = []
         values = []
@@ -699,7 +697,7 @@ class Model(metaclass=ModelMeta):
                     # Fallback for other databases
                     pk_col = meta["primary_key"]
                     pk_val = getattr(self, meta["primary_key"])
-                    if pk_val is None:
+                    if pk_val is None:  # pragma: no cover - always true (guarded at line 693)
                         try:
                             result = await self._db.fetch_one(
                                 f"SELECT {pk_col} FROM {table} ORDER BY {pk_col} DESC LIMIT 1"
@@ -710,6 +708,7 @@ class Model(metaclass=ModelMeta):
                             pass
 
     async def _update(self) -> None:
+        assert self._db is not None, "Model not bound to a database"
         meta = self._meta
         pk_field = meta["primary_key"]
         pk_value = getattr(self, pk_field)
@@ -765,12 +764,12 @@ class Model(metaclass=ModelMeta):
         await self._update()
 
     @classmethod
-    def bind(cls, db: "Database") -> None:
+    def bind(cls, db: Database) -> None:
         """Bind the model to a database."""
         cls._db = db
 
     @classmethod
-    async def create(cls, **kwargs: Any) -> "Model":
+    async def create(cls, **kwargs: Any) -> Model:
         """Create and save a new instance."""
         instance = cls(**kwargs)
         instance._db = cls._db
@@ -778,7 +777,7 @@ class Model(metaclass=ModelMeta):
         return instance
 
     @classmethod
-    async def get(cls, **kwargs: Any) -> Optional["Model"]:
+    async def get(cls, **kwargs: Any) -> Optional[Model]:
         """Get a single instance by primary key or filters."""
         if cls._db is None:
             raise RuntimeError("Model not bound to a database.")
@@ -786,7 +785,7 @@ class Model(metaclass=ModelMeta):
         return await qs.first()
 
     @classmethod
-    async def get_or_create(cls, defaults: Optional[Dict] = None, **kwargs: Any) -> Tuple["Model", bool]:
+    async def get_or_create(cls, defaults: Optional[Dict] = None, **kwargs: Any) -> Tuple[Model, bool]:
         """Get an existing instance or create a new one."""
         instance = await cls.get(**kwargs)
         if instance:
@@ -826,7 +825,7 @@ class Model(metaclass=ModelMeta):
         return await qs.exists()
 
     @classmethod
-    async def bulk_create(cls, instances: List["Model"]) -> None:
+    async def bulk_create(cls, instances: List[Model]) -> None:
         """Bulk insert instances."""
         if cls._db is None:
             raise RuntimeError("Model not bound to a database.")
@@ -889,9 +888,9 @@ class Database:
     def __init__(self, url: str, **kwargs: Any) -> None:
         self.url = url
         self._kwargs = kwargs
-        self._conn = None
+        self._conn: Any = None
         self._dialect = self._parse_dialect(url)
-        self._models: List[type] = []
+        self._models: List[Any] = []
         self._connect_lock = None  # Defer Lock creation for Python 3.8 compat
         self._in_transaction: bool = False
 
@@ -901,12 +900,34 @@ class Database:
             self._connect_lock = asyncio.Lock()
         return self._connect_lock
 
-    @contextmanager
-    def transaction(self):
-        """Context manager for batching multiple statements in one transaction."""
+    @asynccontextmanager
+    async def transaction(self):
+        """Async context manager for a real database transaction.
+
+        Issues a real ``BEGIN`` on entry, ``COMMIT`` on clean exit, and
+        ``ROLLBACK`` if an exception propagates out of the block.
+
+        Nested ``transaction()`` calls reuse the outer transaction and do
+        not create savepoints.
+
+        Usage::
+
+            async with db.transaction():
+                await db.execute("INSERT INTO users (name) VALUES (?)", ["Alice"])
+        """
+        if self._conn is None:
+            await self.connect()
+        if self._in_transaction:
+            yield self
+            return
+        await self._conn.execute("BEGIN")
         self._in_transaction = True
         try:
             yield self
+            await self._conn.commit()
+        except BaseException:
+            await self._conn.rollback()
+            raise
         finally:
             self._in_transaction = False
 
@@ -933,9 +954,11 @@ class Database:
                     raise ImportError(
                         "aiosqlite is required for SQLite. "
                         "Install with: pip install fenrir-framework[sqlite]"
-                    )
+                    ) from None
                 db_path = self.url.replace("sqlite:///", "").replace("sqlite://", "")
-                conn = await aiosqlite.connect(db_path)
+                # isolation_level=None puts sqlite3 in autocommit mode so we can
+                # manage transactions explicitly with BEGIN/COMMIT/ROLLBACK.
+                conn = await aiosqlite.connect(db_path, isolation_level=None)
                 try:
                     conn.row_factory = aiosqlite.Row
                     await conn.execute("PRAGMA journal_mode=WAL")
@@ -951,7 +974,7 @@ class Database:
                     raise ImportError(
                         "asyncpg is required for PostgreSQL. "
                         "Install with: pip install fenrir-framework[postgresql]"
-                    )
+                    ) from None
                 self._conn = await asyncpg.connect(self.url)
 
     async def disconnect(self) -> None:
@@ -962,10 +985,39 @@ class Database:
             finally:
                 self._conn = None
 
+    @staticmethod
+    def _convert_placeholders(sql: str) -> str:
+        """Convert '?' placeholders to PostgreSQL ``$1/$2/...`` style.
+
+        ``?`` inside single-quoted string literals is left untouched.
+        """
+        out = []
+        i = 0
+        param_no = 0
+        in_string = False
+        while i < len(sql):
+            ch = sql[i]
+            if ch == "'":
+                if in_string and i + 1 < len(sql) and sql[i + 1] == "'":
+                    out.append("''")
+                    i += 2
+                    continue
+                in_string = not in_string
+                out.append(ch)
+            elif ch == "?" and not in_string:
+                param_no += 1
+                out.append(f"${param_no}")
+            else:
+                out.append(ch)
+            i += 1
+        return "".join(out)
+
     async def execute(self, sql: str, params: Optional[List[Any]] = None) -> Any:
         """Execute a query and return cursor/last row id."""
         if self._conn is None:
             await self.connect()
+        if self._dialect == "postgresql":
+            sql = self._convert_placeholders(sql)
         if self._dialect == "sqlite":
             cursor = await self._conn.execute(sql, params or [])
             if not self._in_transaction:
@@ -981,6 +1033,8 @@ class Database:
         """Fetch a single row."""
         if self._conn is None:
             await self.connect()
+        if self._dialect == "postgresql":
+            sql = self._convert_placeholders(sql)
         if self._dialect == "sqlite":
             cursor = await self._conn.execute(sql, params or [])
             row = await cursor.fetchone()
@@ -997,6 +1051,8 @@ class Database:
         """Fetch all rows."""
         if self._conn is None:
             await self.connect()
+        if self._dialect == "postgresql":
+            sql = self._convert_placeholders(sql)
         if self._dialect == "sqlite":
             cursor = await self._conn.execute(sql, params or [])
             rows = await cursor.fetchall()
@@ -1009,6 +1065,8 @@ class Database:
         """Execute many queries."""
         if self._conn is None:
             await self.connect()
+        if self._dialect == "postgresql":
+            sql = self._convert_placeholders(sql)
         if self._dialect == "sqlite":
             await self._conn.executemany(sql, params_list)
         else:
@@ -1019,7 +1077,7 @@ class Database:
             else:
                 await self._conn.commit()
 
-    def register_model(self, model_class: type) -> None:
+    def register_model(self, model_class: Any) -> None:
         """Register a model class for auto table creation."""
         self._models.append(model_class)
         model_class.bind(self)
@@ -1032,7 +1090,7 @@ class Database:
         for model_class in self._models:
             await self._create_table(model_class)
 
-    async def _create_table(self, model_class: type) -> None:
+    async def _create_table(self, model_class: Any) -> None:
         """Create a table for a model."""
         meta = model_class._meta
         table = meta["tablename"]
@@ -1060,7 +1118,7 @@ class Database:
             table = model_class._meta["tablename"]
             await self.execute(f"DROP TABLE IF EXISTS {table}")
 
-    async def __aenter__(self) -> "Database":
+    async def __aenter__(self) -> Database:
         await self.connect()
         return self
 

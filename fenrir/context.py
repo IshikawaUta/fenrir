@@ -1,9 +1,9 @@
 import contextvars
-from typing import Any
+from typing import Any, Optional
 
-_request_ctx_var = contextvars.ContextVar("request_ctx")
-_g_ctx_var = contextvars.ContextVar("g_ctx")
-_app_ctx_var = contextvars.ContextVar("app_ctx")
+_request_ctx_var: contextvars.ContextVar[Any] = contextvars.ContextVar("request_ctx")
+_g_ctx_var: contextvars.ContextVar[Any] = contextvars.ContextVar("g_ctx")
+_app_ctx_var: contextvars.ContextVar[Any] = contextvars.ContextVar("app_ctx")
 
 
 class LocalProxy:
@@ -16,7 +16,7 @@ class LocalProxy:
             try:
                 return self._var.get()
             except LookupError:
-                raise RuntimeError("Working outside of context.")
+                raise RuntimeError("Working outside of context.") from None
         # If it's callable, call it.
         elif callable(self._var):
             return self._var()
@@ -61,7 +61,7 @@ class AppProxy(LocalProxy):
         try:
             return _app_ctx_var.get()
         except LookupError:
-            raise RuntimeError("Working outside of application context.")
+            raise RuntimeError("Working outside of application context.") from None
 
 
 class SessionProxy(LocalProxy):
@@ -70,7 +70,7 @@ class SessionProxy(LocalProxy):
             req = _request_ctx_var.get()
             return req.session
         except LookupError:
-            raise RuntimeError("Working outside of request context.")
+            raise RuntimeError("Working outside of request context.") from None
 
 
 class G:
@@ -88,7 +88,7 @@ session = SessionProxy(None)
 class AppContext:
     def __init__(self, app: Any):
         self.app = app
-        self._token = None
+        self._token: Optional[contextvars.Token[Any]] = None
 
     def __enter__(self) -> "AppContext":
         self._token = _app_ctx_var.set(self.app)
@@ -99,7 +99,8 @@ class AppContext:
             if hasattr(self.app, "do_teardown_appcontext"):
                 self.app.do_teardown_appcontext(exc_val)
         finally:
-            _app_ctx_var.reset(self._token)
+            if self._token is not None:
+                _app_ctx_var.reset(self._token)
 
 
 class RequestContext:
@@ -107,8 +108,8 @@ class RequestContext:
         self.app = app
         self.request = request_obj
         self.app_ctx = AppContext(app)
-        self._token_req = None
-        self._token_g = None
+        self._token_req: Optional[contextvars.Token[Any]] = None
+        self._token_g: Optional[contextvars.Token[Any]] = None
 
     def __enter__(self) -> "RequestContext":
         self.app_ctx.__enter__()

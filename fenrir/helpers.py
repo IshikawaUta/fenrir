@@ -1,9 +1,11 @@
-import os
 import mimetypes
+import os
 import urllib.parse
 from typing import Any, Dict, Optional
+
 from fenrir.exceptions import HTTPNotFound
-from fenrir.response import Response, RedirectResponse
+from fenrir.response import RedirectResponse, Response
+
 
 def redirect(location: str, code: int = 302) -> RedirectResponse:
     from fenrir.context import request
@@ -35,7 +37,7 @@ def _build_url_path(path_pattern: str, values: Dict[str, Any]) -> str:
                     param_name = parts[0]
             else:
                 param_name = inner
-            
+
             if param_name not in values:
                 raise ValueError(f"Missing parameter {param_name!r} to build URL")
             new_segments.append(str(values.pop(param_name)))
@@ -49,8 +51,8 @@ def url_for(endpoint: str, **values: Any) -> str:
     try:
         app = current_app._get_current_object()
     except RuntimeError:
-        from fenrir.app import _active_app
-        app = _active_app
+        from fenrir.app import _get_active_app
+        app = _get_active_app()
 
     if app is None:
         raise RuntimeError("Attempted to generate a URL without an active application context.")
@@ -62,12 +64,12 @@ def url_for(endpoint: str, **values: Any) -> str:
         target_bp, target_handler = endpoint.split(".", 1)
 
     matched_route = None
-    
+
     # 1. Search HTTP routes
     for route in app.router.routes:
         bp = app._route_blueprints.get(route)
         bp_name = bp.name if bp else None
-        
+
         # Check matching blueprint and handler name
         if bp_name == target_bp:
             handler_name = getattr(route.handler, "__name__", None)
@@ -109,7 +111,7 @@ def send_file(
     download_name: Optional[str] = None,
 ) -> Response:
     if isinstance(path_or_file, (str, bytes)):
-        filepath = os.path.abspath(path_or_file)
+        filepath = os.fsdecode(os.path.abspath(path_or_file))
         if not os.path.exists(filepath) or not os.path.isfile(filepath):
             raise HTTPNotFound(detail="File not found")
         if mimetype is None:

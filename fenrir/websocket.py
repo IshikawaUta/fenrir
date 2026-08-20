@@ -39,7 +39,7 @@ class WebSocket:
         message = await self._receive()
         if message["type"] != "websocket.connect":
             raise RuntimeError(f"Expected websocket.connect, got {message['type']}")
-        message_accept = {"type": "websocket.accept"}
+        message_accept: Dict[str, Any] = {"type": "websocket.accept"}
         if subprotocol:
             message_accept["subprotocol"] = subprotocol
         if headers:
@@ -52,7 +52,7 @@ class WebSocket:
             try:
                 return await asyncio.wait_for(self._receive(), timeout=self._timeout)
             except asyncio.TimeoutError:
-                raise WebSocketTimeout(self._timeout)
+                raise WebSocketTimeout(self._timeout) from None
         return await self._receive()
 
     async def receive(self) -> Dict[str, Any]:

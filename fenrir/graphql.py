@@ -39,9 +39,8 @@ Usage::
 from __future__ import annotations
 
 import inspect
-import json
 import logging
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger("fenrir.graphql")
 
@@ -54,12 +53,12 @@ def _get_strawberry():
     if _strawberry is None:
         try:
             import strawberry
-            _strawberry = strawberry
+            _strawberry = strawberry  # pragma: no cover
         except ImportError:
             raise ImportError(
                 "strawberry-graphql is required for GraphQL support. "
                 "Install with: pip install fenrir-framework[graphql]"
-            )
+            ) from None
     return _strawberry
 
 

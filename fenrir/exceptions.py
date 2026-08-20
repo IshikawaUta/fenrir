@@ -1,5 +1,8 @@
+from typing import Any
+
+
 class HTTPException(Exception):
-    def __init__(self, status_code: int, detail: str = None, headers: dict = None):
+    def __init__(self, status_code: int, detail: Any = None, headers: Any = None):
         self.status_code = status_code
         self.detail = detail or self.__class__.__name__
         self.headers = headers or {}
@@ -37,7 +40,7 @@ class HTTPConflict(HTTPException):
 
 
 class HTTPUnprocessableEntity(HTTPException):
-    def __init__(self, detail: str = "Unprocessable Entity", headers: dict = None):
+    def __init__(self, detail: Any = "Unprocessable Entity", headers: dict = None):
         super().__init__(422, detail, headers)
 
 

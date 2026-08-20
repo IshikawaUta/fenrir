@@ -1,6 +1,6 @@
 import logging
 import urllib.parse
-from typing import AsyncIterator, Dict, Any, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fenrir.json import json_loads
 
@@ -12,7 +12,7 @@ class Request:
         self.method = scope.get("method", "GET").upper()
         self.path = scope.get("path", "/")
         self.query_string = scope.get("query_string", b"")
-        
+
         # Lazy parsing caches (populated on first access)
         self._args: Optional[Dict[str, str]] = None
         self._args_list: Optional[Dict[str, List[str]]] = None
@@ -22,9 +22,9 @@ class Request:
 
         self._body = b""
         self._json = None
-        self._form = None
+        self._form: Optional[Dict[str, Any]] = None
         self._parsed = False
-        self.session = None
+        self.session: Any = None
         self._receive = None
 
     def _parse_headers(self) -> None:
@@ -57,25 +57,25 @@ class Request:
     def headers(self) -> Dict[str, str]:
         if self._headers is None:
             self._parse_headers()
-        return self._headers
+        return self._headers  # type: ignore[return-value]
 
     @property
     def args(self) -> Dict[str, str]:
         if self._args is None:
             self._parse_query()
-        return self._args
+        return self._args  # type: ignore[return-value]
 
     @property
     def args_list(self) -> Dict[str, List[str]]:
         if self._args_list is None:
             self._parse_query()
-        return self._args_list
+        return self._args_list  # type: ignore[return-value]
 
     @property
     def cookies(self) -> Dict[str, str]:
         if self._cookies is None:
             self._parse_cookies()
-        return self._cookies
+        return self._cookies  # type: ignore[return-value]
 
     @property
     def host(self) -> str:
@@ -87,13 +87,13 @@ class Request:
             trusted = current_app.config.get("TRUSTED_HOSTS")
         except RuntimeError:
             trusted = None
-        
+
         if trusted:
             def match_host(host_val: str, pattern: str) -> bool:
                 if pattern.startswith("*."):
                     return host_val.endswith(pattern[1:]) or host_val == pattern[2:]
                 return host_val == pattern
-            
+
             host_only = h.split(":")[0] if ":" in h else h
             if not any(match_host(host_only, p) for p in trusted):
                 from fenrir.exceptions import HTTPBadRequest
@@ -105,7 +105,7 @@ class Request:
         """Read full request body from ASGI receive channel."""
         if self._parsed:
             return
-        
+
         self._receive = receive
         body_chunks = []
         more_body = True
@@ -166,20 +166,22 @@ class Request:
     async def form(self) -> Dict[str, Any]:
         if self._form is not None:
             return self._form
-            
+
         self._form = {}
         if not self._body:
             return self._form
-            
+
         content_type = self.headers.get("content-type", "")
         if "multipart/form-data" in content_type:
             import io
+
             import python_multipart as multipart
+
             from fenrir.upload import UploadFile
-            
+
             body_stream = io.BytesIO(self._body)
             headers = {"Content-Type": content_type.encode("latin-1")}
-            
+
             def decode_bytes(val) -> str:
                 if isinstance(val, bytes):
                     return val.decode("utf-8", errors="replace")
@@ -271,7 +273,7 @@ class Request:
                     break
                 parser_inst.write(chunk)
             parser_inst.finalize()
-            
+
         elif "application/x-www-form-urlencoded" in content_type:
             parsed = urllib.parse.parse_qs(self._body.decode("utf-8", errors="replace"))
             for k, v in parsed.items():
@@ -279,7 +281,7 @@ class Request:
                     self._form[k] = v[0]
                 else:
                     self._form[k] = v
-                    
+
         return self._form
 
     # FastAPI-style async support
@@ -316,5 +318,5 @@ class Request:
             return int(val)
         except ValueError:
             from fenrir.exceptions import HTTPBadRequest
-            raise HTTPBadRequest(detail=f"Query parameter '{name}' must be an integer")
+            raise HTTPBadRequest(detail=f"Query parameter '{name}' must be an integer") from None
 

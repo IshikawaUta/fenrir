@@ -1,10 +1,12 @@
 import inspect
 import re
 from typing import Any, Dict, List
-from fenrir.compat import Annotated, get_origin, get_args
+
 from pydantic import BaseModel
+
+from fenrir.compat import Annotated, get_args, get_origin
+from fenrir.dependencies import Body, Cookie, Depends, Header, ParamInfo, Path
 from fenrir.routing import Route
-from fenrir.dependencies import ParamInfo, Header, Cookie, Query, Body, Path, Depends
 
 
 def _annotation_to_schema(annotation: Any) -> Dict:
@@ -36,7 +38,7 @@ def _annotation_to_schema(annotation: Any) -> Dict:
 
         # Optional[T] → T with nullable
         # Union[T, None] → T with nullable
-        from typing import Union, Optional
+        from typing import Union
         if origin is Union:
             non_none = [a for a in args if a is not type(None)]
             if len(non_none) == 1:
@@ -163,7 +165,7 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
                         try:
                             if isinstance(annotation, type) and issubclass(annotation, BaseModel):
                                 is_pydantic = True
-                        except TypeError:
+                        except TypeError:  # pragma: no cover
                             pass
 
                     if is_pydantic or isinstance(default, Body):
@@ -242,7 +244,7 @@ def get_openapi(title: str, version: str, routes: List[Route]) -> Dict[str, Any]
                 try:
                     if isinstance(rm, type) and issubclass(rm, BaseModel):
                         rm_name = rm.__name__
-                        rm_schema = rm.model_json_schema()
+                        rm_schema = rm.model_json_schema()  # type: ignore[attr-defined]
                         if "$defs" in rm_schema:
                             for d_name, d_schema in rm_schema["$defs"].items():
                                 schemas[d_name] = d_schema

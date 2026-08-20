@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import uuid
 from datetime import date, datetime
-from typing import Any, Callable, Dict, Type
+from typing import Any, Dict
 
 # Try to import orjson, fallback to stdlib json
 try:
@@ -39,9 +39,9 @@ class DefaultJSONProvider(JSONProvider):
             # It handles most types natively, use default fallback for others
             result = _orjson.dumps(obj)
             return result.decode("utf-8") if isinstance(result, bytes) else result
-        
+
         kwargs.setdefault("ensure_ascii", False)
-        
+
         def default(o: Any) -> Any:
             if isinstance(o, datetime):
                 return o.isoformat()
@@ -50,7 +50,7 @@ class DefaultJSONProvider(JSONProvider):
             if isinstance(o, uuid.UUID):
                 return str(o)
             raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
-        
+
         kwargs.setdefault("default", default)
         return _stdlib_json.dumps(obj, **kwargs)
 
@@ -138,7 +138,7 @@ class TaggedJSONSerializer:
 
     def dumps(self, obj: Any) -> str:
         def tag(o: Any) -> Any:
-            for tag_name, tag_obj in self.tags.items():
+            for tag_obj in self.tags.values():
                 if tag_obj.check(o):
                     return tag_obj.to_json(o)
             if isinstance(o, dict):

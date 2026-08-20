@@ -10,7 +10,8 @@ import asyncio
 import logging
 import time
 from collections import deque
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
+from typing import Any, Callable, Dict, Generic, Optional, TypeVar
+
 from fenrir.compat import to_thread
 
 logger = logging.getLogger("fenrir.pool")
@@ -128,6 +129,7 @@ class ConnectionPool(Generic[T]):
         """Release a connection back to the pool."""
         if self._lock is None:
             return
+        assert self._semaphore is not None
         async with self._lock:
             self._active -= 1
             if self._closed:
@@ -142,6 +144,7 @@ class ConnectionPool(Generic[T]):
         if self._lock is None:
             await self._destroy_connection(item)
             return
+        assert self._semaphore is not None
         async with self._lock:
             self._active -= 1
             self._semaphore.release()
@@ -186,11 +189,14 @@ class _PoolConnection(Generic[T]):
 
     @property
     def connection(self) -> T:
+        assert self._item is not None
         return self._item.conn
 
     async def __aenter__(self) -> T:
         if not self._pool._initialized:
             await self._pool.initialize()
+        assert self._pool._semaphore is not None
+        assert self._pool._lock is not None
 
         if self._pool._closed:
             raise RuntimeError("Connection pool is closed")
@@ -273,4 +279,4 @@ class DatabasePool(ConnectionPool[T]):
                         attempt + 1, attempts, wait, e,
                     )
                     await asyncio.sleep(wait)
-        raise last_exc
+        raise last_exc  # type: ignore[misc]

@@ -17,14 +17,10 @@ Usage::
 """
 from __future__ import annotations
 
-import asyncio
-import functools
-import hashlib
+import logging
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("fenrir.performance")
 
@@ -234,7 +230,7 @@ class OptimizedPipeline:
         self._middlewares: List[Tuple[Callable, Dict]] = []
         self._compiled: Optional[Callable] = None
 
-    def add(self, middleware: Callable, **kwargs: Any) -> "OptimizedPipeline":
+    def add(self, middleware: Callable, **kwargs: Any) -> OptimizedPipeline:
         self._middlewares.append((middleware, kwargs))
         self._compiled = None
         return self

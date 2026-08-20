@@ -31,12 +31,9 @@ Usage::
 """
 from __future__ import annotations
 
-import asyncio
-import importlib
 import logging
 import threading
-from concurrent import futures
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("fenrir.grpc")
 
@@ -66,7 +63,7 @@ class GRPCService:
 class GRPCInterceptor:
     """Base class for gRPC interceptors."""
 
-    async def intercept(self, method: str, request: Any, context: Any) -> Any:
+    async def intercept(self, method: Callable[..., Any], request: Any, context: Any) -> Any:
         """Override to intercept RPC calls."""
         return await method(request, context)
 
@@ -120,7 +117,7 @@ class GRPCServer:
         self._interceptors = interceptors or []
         self._services: List[GRPCService] = []
         self._registered_services: Dict[str, Dict[str, Any]] = {}
-        self._server = None
+        self._server: Any = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
 
@@ -158,13 +155,14 @@ class GRPCServer:
             return
 
         try:
-            import grpc
             from concurrent import futures
+
+            import grpc
         except ImportError:
             raise ImportError(
                 "grpcio is required for gRPC support. "
                 "Install with: pip install fenrir-framework[grpc]"
-            )
+            ) from None
 
         self._server = grpc.server(
             futures.ThreadPoolExecutor(max_workers=self._max_workers)
@@ -191,13 +189,13 @@ class GRPCServer:
     def _register_service(self, service: GRPCService) -> None:
         """Register a service's handlers with the gRPC server."""
         try:
-            import grpc
+            import grpc  # noqa: F401
         except ImportError:
             return
 
         handlers = service._handlers
         self._registered_services[service.service_name] = handlers
-        for method_name, handler in handlers.items():
+        for method_name in handlers:
             logger.debug("Registered gRPC handler: %s.%s", service.service_name, method_name)
 
     def _create_health_servicer(self) -> Any:
@@ -262,7 +260,7 @@ class GRPCClient:
             import grpc
             import grpc.aio
         except ImportError:
-            raise ImportError("grpcio is required for gRPC client")
+            raise ImportError("grpcio is required for gRPC client") from None
 
         if self._credentials:
             self._channel = grpc.aio.secure_channel(self._target, self._credentials)
@@ -275,7 +273,7 @@ class GRPCClient:
             await self._channel.close()
             self._channel = None
 
-    async def __aenter__(self) -> "GRPCClient":
+    async def __aenter__(self) -> GRPCClient:
         await self.connect()
         return self
 

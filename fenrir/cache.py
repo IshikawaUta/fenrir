@@ -34,14 +34,13 @@ import functools
 import hashlib
 import json
 import logging
-import os
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 from fenrir.compat import to_thread
-from fenrir.json import _orjson, _HAS_ORJSON
+from fenrir.json import _HAS_ORJSON, _orjson
 
 logger = logging.getLogger("fenrir.cache")
 
@@ -188,7 +187,7 @@ class RedisCache(CacheBackend):
                 raise ImportError(
                     "redis is required for RedisCache. "
                     "Install with: pip install fenrir-framework[redis]"
-                )
+                ) from None
         return self._redis
 
     def _make_key(self, key: str) -> str:
@@ -288,7 +287,7 @@ class RedisCache(CacheBackend):
             await self._redis.aclose()
             self._redis = None
 
-    async def __aenter__(self) -> "RedisCache":
+    async def __aenter__(self) -> RedisCache:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -473,7 +472,7 @@ class Cache:
                     cache_key = ":".join(key_parts)
                 await self.delete(cache_key)
 
-            wrapper.invalidate = invalidate
+            wrapper.invalidate = invalidate  # type: ignore[attr-defined]
             return wrapper
         return decorator
 
@@ -489,7 +488,7 @@ class Cache:
                     await self.delete(cache_key)
                 elif key_prefix:
                     # Invalidate all keys with prefix using SCAN
-                    backend = self._backend
+                    backend: Any = self._backend
                     if hasattr(backend, '_redis'):
                         # Redis: scan for keys with prefix
                         try:
@@ -518,7 +517,7 @@ class Cache:
             return wrapper
         return decorator
 
-    async def __aenter__(self) -> "Cache":
+    async def __aenter__(self) -> Cache:
         return self
 
     async def __aexit__(self, *args: Any) -> None:

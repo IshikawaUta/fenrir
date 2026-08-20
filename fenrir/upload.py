@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any
 
+
 class UploadFile:
     def __init__(self, filename: str, file_object: Any, content_type: str = ""):
         self.filename = filename

@@ -7,11 +7,23 @@ lives in ``_app_core`` (init, routing, middleware, blueprints) and
 import sys
 from typing import Optional
 
-from fenrir._app_core import Blueprint, FenrirCoreMixin
+from fenrir._app_core import Blueprint, FenrirCoreMixin  # noqa: F401
 from fenrir._app_dispatch import FenrirDispatchMixin
 
-# Kept for backward compatibility — used by templating.py and helpers.py
+# Deprecated compatibility hook. The canonical way to access the active app is
+# ``fenrir.context.current_app`` (backed by a contextvar). This attribute is
+# only kept so existing imports/tests keep working; it is no longer written by
+# the dispatch pipeline.
 _active_app: Optional["Fenrir"] = None
+
+
+def _get_active_app() -> Optional["Fenrir"]:
+    """Return the app bound to the current contextvar, or None."""
+    from fenrir.context import _app_ctx_var
+    try:
+        return _app_ctx_var.get()
+    except LookupError:
+        return None
 
 
 class Fenrir(FenrirCoreMixin, FenrirDispatchMixin):
@@ -24,11 +36,12 @@ class Fenrir(FenrirCoreMixin, FenrirDispatchMixin):
     def __init__(self, **kwargs):
         self._init_core(**kwargs)
 
-    def run(self, host: str = "127.0.0.1", port: int = 8000, workers: int = 1, app_path: str = None, **kwargs):
+    def run(self, host: str = "127.0.0.1", port: int = 8000, workers: int = 1, app_path: Optional[str] = None, **kwargs):
         """Run the Fenrir app locally using Asteri ASGI worker."""
+        import os
+
         from asteri.arbiter import Arbiter
         from asteri.workers.asgi import ASGIWorker
-        import os
 
         if app_path is None:
             try:
@@ -36,7 +49,6 @@ class Fenrir(FenrirCoreMixin, FenrirDispatchMixin):
                 caller_file = frame.f_globals.get("__file__")
                 caller_var = frame.f_locals.get("app")
                 if caller_file and caller_var is self:
-                    import importlib
                     mod_name = frame.f_globals.get("__name__")
                     if mod_name and mod_name != "__main__":
                         app_path = f"{mod_name}:app"

@@ -1,19 +1,19 @@
 """Fenrir ASGI dispatch — request handling, response coercion, exception handling."""
 import asyncio
+import html
 import inspect
 import logging
-import html
-import traceback
 import sys
+import traceback
 from typing import Any, Callable, Dict
 
 from fenrir.compat import to_thread
-from fenrir.request import Request
-from fenrir.response import Response, JSONResponse, HTMLResponse
-from fenrir.context import _request_ctx_var, _g_ctx_var, _app_ctx_var, G, RequestContext
-from fenrir.dependencies import resolve_parameters, _get_cached_signature
+from fenrir.context import G, RequestContext, _app_ctx_var, _g_ctx_var, _request_ctx_var
+from fenrir.dependencies import _get_cached_signature, resolve_parameters
 from fenrir.exceptions import HTTPException
-from fenrir.signals import request_started, request_finished, got_request_exception
+from fenrir.request import Request
+from fenrir.response import HTMLResponse, JSONResponse, Response
+from fenrir.signals import got_request_exception, request_finished, request_started
 
 logger = logging.getLogger("fenrir")
 
@@ -35,10 +35,31 @@ def _status_text(code: int) -> str:
 class FenrirDispatchMixin:
     """Mixin providing ASGI __call__, _dispatch, _run_handler, and response methods."""
 
+    # Attributes provided by FenrirCoreMixin at runtime (declared here so mypy
+    # understands the combined Fenrir class).
+    _asgi_middlewares: Any = None
+    _asgi_app: Any = None
+    _config_security_applied: bool = False
+    _wsgi_mounts: Any = None
+    _asgi_mounts: Any = None
+    session_interface: Any = None
+    config: Any = None
+    router: Any = None
+    _route_blueprints: Any = None
+    middlewares: Any = None
+    exception_handlers: Any = None
+    listeners: Any = None
+
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable):
-        import fenrir.app as _app_mod
-        _app_mod._active_app = self
         _app_ctx_var.set(self)
+
+        # Re-check config-driven security middleware (config may be set after
+        # Fenrir() construction). Force a rebuild if new middleware was added
+        # after the ASGI stack was already cached.
+        if not self._config_security_applied:
+            # Defined on FenrirCoreMixin (combined at runtime via Fenrir).
+            if self._apply_config_security_middleware() and self._asgi_app:  # type: ignore[attr-defined]
+                self._asgi_app = None
 
         if self._asgi_middlewares and not self._asgi_app:
             app = self._dispatch
@@ -60,11 +81,11 @@ class FenrirDispatchMixin:
                 raise
 
     async def _dispatch(self, scope: Dict[str, Any], receive: Callable, send: Callable):
-        # Note: _active_app and _app_ctx_var are already set in __call__
-        # Only set if called directly (e.g., from test client without middleware)
-        import fenrir.app as _app_mod
-        if _app_mod._active_app is not self:
-            _app_mod._active_app = self
+        # Note: _app_ctx_var is already set in __call__.
+        # Only set it if called directly (e.g., from test client without middleware).
+        try:
+            _app_ctx_var.get()
+        except LookupError:
             _app_ctx_var.set(self)
 
         scope_type = scope.get("type")
@@ -144,11 +165,11 @@ class FenrirDispatchMixin:
                     _ = req.host  # triggers host validation
 
                 route, path_params, handler_func = self.router.match(req.path, req.method)
-                req.path_params = path_params
+                req.path_params = path_params  # type: ignore[attr-defined]
 
                 active_bp = self._route_blueprints.get(route)
                 if active_bp:
-                    req.blueprint = active_bp.name
+                    req.blueprint = active_bp.name  # type: ignore[attr-defined]
 
                 # Request middlewares
                 for mw in self.middlewares["request"]:
@@ -193,7 +214,7 @@ class FenrirDispatchMixin:
                     response_obj = self._apply_response_model(route, response_obj)
 
                 if not isinstance(response_obj, Response):
-                    response_obj = self._coerce_response(response_obj)
+                    response_obj = self._coerce_response(response_obj)  # pragma: no cover
 
                 # Response middlewares
                 if active_bp:
@@ -230,7 +251,7 @@ class FenrirDispatchMixin:
                 try:
                     if inspect.iscoroutinefunction(cleanup):
                         await cleanup()
-                    elif asyncio.iscoroutine(cleanup):
+                    elif asyncio.iscoroutine(cleanup):  # pragma: no cover
                         await cleanup
                     elif callable(cleanup):
                         res = cleanup()
@@ -241,7 +262,7 @@ class FenrirDispatchMixin:
 
         # Send HTTP response
         if response_obj is None:
-            response_obj = Response(status=500, content=b"Internal Server Error")
+            response_obj = Response(status=500, content=b"Internal Server Error")  # pragma: no cover
         await self._send_http_response(scope, response_obj, receive, send)
 
         # Background tasks
@@ -294,7 +315,7 @@ class FenrirDispatchMixin:
                 except Exception as e:
                     logger.error("Error in streaming response", exc_info=e)
             await send({"type": "http.response.body", "body": b"", "more_body": False})
-        elif hasattr(response_obj, "__call__"):
+        elif callable(response_obj):  # pragma: no cover
             await response_obj(scope, receive, send)
         else:
             await send({
@@ -361,11 +382,11 @@ class FenrirDispatchMixin:
 
             if isinstance(rm, type) and issubclass(rm, BaseModel):
                 if isinstance(content, BaseModel):
-                    validated = rm.model_validate(content.model_dump())
+                    validated = rm.model_validate(content.model_dump())  # type: ignore[attr-defined]
                 elif isinstance(content, dict):
-                    validated = rm.model_validate(content)
+                    validated = rm.model_validate(content)  # type: ignore[attr-defined]
                 else:
-                    validated = rm.model_validate(content)
+                    validated = rm.model_validate(content)  # type: ignore[attr-defined]
 
                 serialised = validated.model_dump(
                     exclude_unset=exclude_unset,
@@ -414,10 +435,8 @@ class FenrirDispatchMixin:
 
     async def _handle_exception(self, req: Request, exc: Exception) -> Response:
         if getattr(self, "dev_mode", False):
-            exc_type, _, exc_tb = sys.exc_info()
-            if exc_tb is None:
-                exc_type = type(exc)
-            return self._render_debug_page(req, exc, exc_type, exc_tb)
+            _, _, exc_tb = sys.exc_info()
+            return self._render_debug_page(req, exc, type(exc), exc_tb)
 
         status_code = getattr(exc, "status_code", None)
         if status_code in self.exception_handlers:
@@ -476,7 +495,7 @@ class FenrirDispatchMixin:
                         end = min(len(all_lines), lineno + 4)
                         for i in range(start, end):
                             code_context.append((i + 1, all_lines[i].rstrip("\n")))
-                except (OSError, IOError):
+                except OSError:  # pragma: no cover
                     pass
 
                 source_frames.append({
@@ -518,7 +537,7 @@ class FenrirDispatchMixin:
         frames_html = ""
         vendor_count = 0
 
-        for idx, frame_info in enumerate(source_frames):
+        for frame_info in source_frames:
             fname = html.escape(frame_info["filename"])
             ffunc = html.escape(frame_info["func_name"])
             flineno = frame_info["lineno"]

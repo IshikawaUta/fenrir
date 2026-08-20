@@ -1,9 +1,10 @@
 import inspect
 import re
-from typing import Dict, Any, List, Tuple, Callable, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+
 from fenrir.exceptions import HTTPMethodNotAllowed, HTTPNotFound
 
-CONVERTER_PATTERNS = {
+CONVERTER_PATTERNS: Dict[str, Tuple[str, Callable]] = {
     "int": (r"\d+", int),
     "float": (r"\d+(?:\.\d+)?", float),
     "path": (r".+", str),
@@ -13,20 +14,20 @@ CONVERTER_PATTERNS = {
 
 def compile_path(path_pattern: str) -> Tuple[re.Pattern, Dict[str, Callable]]:
     segment_re = re.compile(r"<([^>]+)>")
-    parts = []
-    converters = {}
+    parts: List[str] = []
+    converters: Dict[str, Callable] = {}
     last_idx = 0
-    
+
     for match in segment_re.finditer(path_pattern):
         parts.append(re.escape(path_pattern[last_idx:match.start()]))
         content = match.group(1)
         subparts = content.split(":")
-        
+
         converter_name = "str"
         param_name = ""
-        pattern = r"[^/]+"
-        converter_fn = str
-        
+        pattern: Any = r"[^/]+"
+        converter_fn: Callable = str
+
         if len(subparts) == 1:
             param_name = subparts[0]
         elif len(subparts) == 2:
@@ -40,7 +41,7 @@ def compile_path(path_pattern: str) -> Tuple[re.Pattern, Dict[str, Callable]]:
             else:
                 converter_name = "str"
                 param_name = p1
-        elif len(subparts) == 3:
+        elif len(subparts) == 3:  # pragma: no cover
             p1, p2, p3 = subparts[0].strip(), subparts[1].strip(), subparts[2].strip()
             if p1 == "re":
                 converter_name = "re"
@@ -53,16 +54,16 @@ def compile_path(path_pattern: str) -> Tuple[re.Pattern, Dict[str, Callable]]:
             else:
                 param_name = p1
                 converter_name = "str"
-                
+
         if converter_name in CONVERTER_PATTERNS:
             pattern, converter_fn = CONVERTER_PATTERNS[converter_name]
-        elif converter_name == "re":
+        elif converter_name == "re":  # pragma: no cover
             converter_fn = str
-            
+
         parts.append(f"(?P<{param_name}>{pattern})")
         converters[param_name] = converter_fn
         last_idx = match.end()
-        
+
     parts.append(re.escape(path_pattern[last_idx:]))
     full_regex = re.compile("^" + "".join(parts) + "$")
     return full_regex, converters
@@ -73,11 +74,11 @@ class _TrieNode:
     __slots__ = ('children', 'param_child', 'param_name', 'param_converter', 'routes')
 
     def __init__(self):
-        self.children: Dict[str, "_TrieNode"] = {}
-        self.param_child: Optional["_TrieNode"] = None
+        self.children: Dict[str, _TrieNode] = {}
+        self.param_child: Optional[_TrieNode] = None
         self.param_name: Optional[str] = None
         self.param_converter: Optional[str] = None  # 'int', 'float', 'path', 'str', etc.
-        self.routes: List["Route"] = []
+        self.routes: List[Route] = []
 
 
 class RouteTrie:
@@ -95,7 +96,7 @@ class RouteTrie:
 
     def __init__(self):
         self.root = _TrieNode()
-        self._static_routes: Dict[str, List["Route"]] = {}
+        self._static_routes: Dict[str, List[Route]] = {}
 
     def insert(self, route: "Route") -> None:
         """Insert a route into the trie index."""
@@ -144,7 +145,7 @@ class RouteTrie:
     def search(self, path: str) -> List["Route"]:
         """Return candidate routes matching *path*. O(k) where k = segments."""
         segments = [s for s in path.split("/") if s]
-        candidates: List["Route"] = []
+        candidates: List[Route] = []
         self._search_node(self.root, segments, 0, candidates)
         return candidates
 
@@ -240,7 +241,7 @@ class Route:
         m = self.regex.match(path)
         if not m:
             return None
-        
+
         params = {}
         for name, val_str in m.groupdict().items():
             converter = self.converters.get(name, str)
@@ -266,21 +267,34 @@ class Router:
         self.route_class = route_class or Route
         self.included_routers = []
         self._trie = RouteTrie()
+        # Cache route_class __init__ signature (custom route classes may not
+        # accept extra kwargs). Computed once instead of per add_route call.
+        self._init_params: Optional[set] = None
+        self._has_var_kw = True
+        try:
+            _init_sig = inspect.signature(self.route_class.__init__)
+            self._init_params = set(_init_sig.parameters.keys())
+            self._has_var_kw = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in _init_sig.parameters.values()
+            )
+        except (ValueError, TypeError):
+            pass
 
     def include_router(self, other: "Router", prefix: str = ""):
         if other is self:
             raise RuntimeError("Cannot include a router into itself")
-        
+
         # Check for circular/recursive inclusion
         def check_circular(r):
             if r is self:
                 raise RuntimeError("Circular router inclusion detected")
             for sub in getattr(r, "included_routers", []):
                 check_circular(sub)
-                
+
         check_circular(other)
         self.included_routers.append(other)
-        
+
         for route in other.routes:
             self.add_route(
                 prefix + route.path_pattern, route.handler, route.methods,
@@ -321,7 +335,7 @@ class Router:
                         if methods is None:
                             methods = []
                         methods.append(attr[3:].upper())
-        
+
         if not methods:
             methods = ["GET"]
 
@@ -345,18 +359,8 @@ class Router:
         filtered_kwargs = {k: v for k, v in route_kwargs.items() if k in _route_meta_keys}
 
         # Respect custom route classes that don't accept extra kwargs
-        import inspect as _inspect
-        try:
-            _init_sig = _inspect.signature(self.route_class.__init__)
-            _init_params = set(_init_sig.parameters.keys())
-            _has_var_kw = any(
-                p.kind == _inspect.Parameter.VAR_KEYWORD
-                for p in _init_sig.parameters.values()
-            )
-            if not _has_var_kw:
-                filtered_kwargs = {k: v for k, v in filtered_kwargs.items() if k in _init_params}
-        except (ValueError, TypeError):
-            pass
+        if not self._has_var_kw and self._init_params is not None:
+            filtered_kwargs = {k: v for k, v in filtered_kwargs.items() if k in self._init_params}
 
         route = self.route_class(path_pattern, handler, methods, **filtered_kwargs)
         self.routes.append(route)
@@ -373,6 +377,31 @@ class Router:
         path_matched = False
         allowed_methods = set()
 
+        # Fast path: exact static-route lookup (no trie descent + regex).
+        static = self._trie._static_routes.get(path)
+        if static:
+            for route in static:
+                if route.is_falcon_resource():
+                    resource_method = route.get_resource_method(effective_method)
+                    if resource_method:
+                        return route, {}, resource_method
+                    # Also try original method for HEAD on Falcon resources
+                    if method != effective_method:
+                        resource_method = route.get_resource_method(method)
+                        if resource_method:
+                            return route, {}, resource_method
+                    # Find all available on_* methods for this resource
+                    for attr in dir(route.handler):
+                        if attr.startswith("on_") and callable(getattr(route.handler, attr)):
+                            allowed_methods.add(attr[3:].upper())
+                else:
+                    if effective_method in route.methods or method in route.methods:
+                        return route, {}, route.handler
+                    allowed_methods.update(route.methods)
+            # No method match here — fall through to the trie loop, which
+            # may still find a parametric route matching this path.
+            path_matched = True
+
         # Use trie for O(k) candidate lookup instead of O(n) linear scan
         candidates = self._trie.search(path)
 
@@ -380,7 +409,7 @@ class Router:
             params = route.match(path)
             if params is not None:
                 path_matched = True
-                
+
                 # Check methods
                 if route.is_falcon_resource():
                     resource_method = route.get_resource_method(effective_method)
@@ -400,13 +429,13 @@ class Router:
                         return route, params, route.handler
                     else:
                         allowed_methods.update(route.methods)
-                        
+
         if path_matched:
             raise HTTPMethodNotAllowed(
                 detail=f"Allowed methods: {', '.join(sorted(allowed_methods))}",
                 headers={"Allow": ", ".join(sorted(allowed_methods))},
             )
-        
+
         raise HTTPNotFound(detail="No route matches the requested path.")
 
     def match_websocket(self, path: str) -> Tuple[Route, Dict[str, Any], Callable]:

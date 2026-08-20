@@ -1,4 +1,5 @@
-from typing import Callable, Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
+
 from fenrir.exceptions import HTTPException
 
 # HTTP Status Constants
@@ -21,8 +22,8 @@ def before(action: Callable[[Any, Any, Any, Dict[str, Any]], Any]) -> Callable[[
     """Execute action(req, resp, resource, params) before the responder."""
     def decorator(responder: Callable) -> Callable:
         if not hasattr(responder, "_falcon_before_hooks"):
-            responder._falcon_before_hooks = []
-        responder._falcon_before_hooks.append(action)
+            responder._falcon_before_hooks = []  # type: ignore[attr-defined]
+        responder._falcon_before_hooks.append(action)  # type: ignore[attr-defined]
         return responder
     return decorator
 
@@ -31,10 +32,10 @@ def after(action: Callable[[Any, Any, Any, Dict[str, Any]], Any]) -> Callable[[C
     """Execute action(req, resp, resource, params) after the responder."""
     def decorator(responder: Callable) -> Callable:
         if not hasattr(responder, "_falcon_after_hooks"):
-            responder._falcon_after_hooks = []
+            responder._falcon_after_hooks = []  # type: ignore[attr-defined]
         # In Falcon, hooks executed by @after run in reverse order of decoration,
         # but to keep it simple we just append them.
-        responder._falcon_after_hooks.append(action)
+        responder._falcon_after_hooks.append(action)  # type: ignore[attr-defined]
         return responder
     return decorator
 

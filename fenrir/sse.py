@@ -2,9 +2,10 @@ import asyncio
 import logging
 import queue as _queue
 import threading
-from typing import Any, AsyncIterable, Union, Dict, Optional
-from fenrir.response import Response
+from typing import Any, AsyncIterable, Dict, Optional, Union
+
 from fenrir.compat import _thread_pool
+from fenrir.response import Response
 
 logger = logging.getLogger("fenrir.sse")
 

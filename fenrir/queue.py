@@ -38,14 +38,11 @@ from __future__ import annotations
 
 import asyncio
 import enum
-import importlib
-import inspect
 import logging
 import time
-import traceback
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from fenrir.compat import to_thread
 from fenrir.json import json_dumps, json_loads
@@ -101,7 +98,7 @@ class Job:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Job":
+    def from_dict(cls, data: dict) -> Job:
         data = dict(data)  # Don't mutate input
         data["status"] = JobStatus(data.get("status", "pending"))
         # Convert args back to tuple
@@ -145,41 +142,127 @@ class MemoryQueue(QueueBackend):
     """In-process async queue using asyncio.PriorityQueue.
 
     Best for single-process applications and development.
+
+    Pass ``sqlite_path`` to persist jobs to a SQLite database so that jobs
+    survive process restarts. Pending/retry jobs are restored on startup.
     """
 
-    def __init__(self, max_size: int = 10000) -> None:
+    def __init__(self, max_size: int = 10000, sqlite_path: Optional[str] = None) -> None:
         self._queue: Optional[asyncio.PriorityQueue] = None
         self._jobs: Dict[str, Job] = {}
         self._processing: Set[str] = set()
+        self._delayed: Dict[str, float] = {}  # job_id -> ready_at (monotonic-ish)
         self._max_size = max_size
         self._cleanup_entries: List[tuple] = []  # (timestamp, job_id)
         self._cleanup_task: Optional[asyncio.Task] = None
+        self._sqlite_path = sqlite_path
+        self._db = None
+        self._db_lock: Optional[asyncio.Lock] = None
+
+    async def _ensure_db(self):
+        """Lazily open the SQLite store and restore persisted jobs."""
+        if self._db is None and self._sqlite_path:
+            if self._db_lock is None:
+                self._db_lock = asyncio.Lock()
+            async with self._db_lock:
+                if self._db is None:  # pragma: no branch
+                    import aiosqlite
+                    db = await aiosqlite.connect(self._sqlite_path)
+                    db.row_factory = aiosqlite.Row
+                    await db.execute(
+                        "CREATE TABLE IF NOT EXISTS queue_jobs "
+                        "(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL)"
+                    )
+                    await db.commit()
+                    self._db = db
+                    await self._restore_from_db()
+        return self._db
+
+    async def _restore_from_db(self) -> None:
+        """Load pending/retry jobs from the store back into memory."""
+        if self._db is None:
+            return
+        cursor = await self._db.execute("SELECT data FROM queue_jobs")
+        rows = await cursor.fetchall()
+        now = time.time()
+        for row in rows:
+            try:
+                job = Job.from_dict(json_loads(row["data"]))
+            except Exception:
+                continue
+            if job.status not in (JobStatus.PENDING, JobStatus.RETRY):
+                continue
+            self._jobs[job.id] = job
+            if job.delay > 0:
+                ready_at = job.created_at + job.delay
+                if ready_at <= now:
+                    self._get_queue().put_nowait((-job.priority, job.created_at, job.id))
+                else:
+                    self._delayed[job.id] = ready_at
+            else:
+                self._get_queue().put_nowait((-job.priority, job.created_at, job.id))
+        logger.debug("Restored %d job(s) from SQLite store", len(self._jobs))
+
+    async def _persist(self, job: Job) -> None:
+        """Insert or update *job* in the SQLite store."""
+        if self._db is not None:
+            await self._db.execute(
+                "INSERT INTO queue_jobs (id, data, status) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET data=excluded.data, status=excluded.status",
+                (job.id, json_dumps(job.to_dict()), job.status.value),
+            )
+            await self._db.commit()
+
+    async def _persist_delete(self, job_id: str) -> None:
+        """Delete *job_id* from the SQLite store."""
+        if self._db is not None:
+            await self._db.execute("DELETE FROM queue_jobs WHERE id = ?", (job_id,))
+            await self._db.commit()
 
     def _get_queue(self) -> asyncio.PriorityQueue:
         if self._queue is None:
             self._queue = asyncio.PriorityQueue()
         return self._queue
 
+    def _promote_ready(self) -> bool:
+        """Move delayed jobs whose wait time has elapsed into the main queue."""
+        now = time.time()
+        ready_ids = [jid for jid, ready_at in self._delayed.items() if ready_at <= now]
+        for jid in ready_ids:
+            self._delayed.pop(jid, None)
+            job = self._jobs.get(jid)
+            if job is not None:
+                self._get_queue().put_nowait((-job.priority, job.created_at, job.id))
+        return bool(ready_ids)
+
     async def enqueue(self, job: Job) -> None:
+        await self._ensure_db()
         self._jobs[job.id] = job
-        await self._get_queue().put((-job.priority, job.created_at, job.id))
+        if job.delay > 0:
+            self._delayed[job.id] = job.created_at + job.delay
+        else:
+            await self._get_queue().put((-job.priority, job.created_at, job.id))
+        await self._persist(job)
         logger.debug("Enqueued job %s (handler=%s)", job.id, job.handler)
 
     async def dequeue(self) -> Optional[Job]:
+        await self._ensure_db()
+        self._promote_ready()
         q = self._get_queue()
         while not q.empty():
             try:
-                _, _, job_id = q.get_nowait()
+                _, _, job_id = q.get_nowait()  # pragma: no branch
                 job = self._jobs.get(job_id)
                 if job and job.status in (JobStatus.PENDING, JobStatus.RETRY):
                     self._processing.add(job_id)
                     return job
                 # Job was cancelled or already running — skip
-            except asyncio.QueueEmpty:
+            except asyncio.QueueEmpty:  # pragma: no cover
                 break
         return None
 
     async def peek(self, n: int = 1) -> List[Job]:
+        await self._ensure_db()
         jobs = []
         for job in self._jobs.values():
             if job.status in (JobStatus.PENDING, JobStatus.RETRY):
@@ -189,6 +272,7 @@ class MemoryQueue(QueueBackend):
         return sorted(jobs, key=lambda j: (-j.priority, j.created_at))
 
     async def size(self) -> int:
+        await self._ensure_db()
         return sum(
             1 for j in self._jobs.values()
             if j.status in (JobStatus.PENDING, JobStatus.RETRY)
@@ -196,22 +280,29 @@ class MemoryQueue(QueueBackend):
 
     async def requeue(self, job: Job) -> None:
         job.status = JobStatus.PENDING
-        await self._get_queue().put((-job.priority, job.created_at, job.id))
+        if job.delay > 0:
+            self._delayed[job.id] = time.time() + job.delay
+        else:
+            await self._get_queue().put((-job.priority, job.created_at, job.id))
 
     async def get_job(self, job_id: str) -> Optional[Job]:
+        await self._ensure_db()
         return self._jobs.get(job_id)
 
     async def update_job(self, job: Job) -> None:
+        await self._ensure_db()
         self._jobs[job.id] = job
         # Clean up completed/failed/cancelled jobs to prevent memory leak
         if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
             self._processing.discard(job.id)
+            self._delayed.pop(job.id, None)
             # Mark for cleanup after 60 seconds
             import time as _time
             self._cleanup_entries.append((_time.time() + 60, job.id))
             # Start single cleanup task if not running
             if self._cleanup_task is None or self._cleanup_task.done():
                 self._cleanup_task = asyncio.create_task(self._run_cleanup())
+        await self._persist(job)
 
     async def _run_cleanup(self) -> None:
         """Single background task that processes all cleanup entries."""
@@ -223,6 +314,7 @@ class MemoryQueue(QueueBackend):
             for i in reversed(ready):
                 _, job_id = self._cleanup_entries.pop(i)
                 self._jobs.pop(job_id, None)
+                await self._persist_delete(job_id)
             if self._cleanup_entries:
                 # Sleep until next entry is ready
                 earliest = min(ts for ts, _ in self._cleanup_entries)
@@ -231,14 +323,24 @@ class MemoryQueue(QueueBackend):
                 break
 
     async def remove_job(self, job_id: str) -> bool:
+        await self._ensure_db()
         if job_id in self._jobs:
             del self._jobs[job_id]
             self._processing.discard(job_id)
+            self._delayed.pop(job_id, None)
+            await self._persist_delete(job_id)
             return True
         return False
 
     async def get_jobs_by_status(self, status: JobStatus) -> List[Job]:
+        await self._ensure_db()
         return [j for j in self._jobs.values() if j.status == status]
+
+    async def close(self) -> None:
+        """Close the optional SQLite store."""
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
 
 
 class RedisQueue(QueueBackend):
@@ -262,12 +364,12 @@ class RedisQueue(QueueBackend):
             if self._init_lock is None:
                 self._init_lock = asyncio.Lock()
             async with self._init_lock:
-                if self._redis is None:
+                if self._redis is None:  # pragma: no branch
                     try:
                         import redis.asyncio as aioredis
                         self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
                     except ImportError:
-                        raise ImportError("redis is required for RedisQueue")
+                        raise ImportError("redis is required for RedisQueue") from None
         return self._redis
 
     def _key(self, name: str) -> str:
@@ -285,8 +387,23 @@ class RedisQueue(QueueBackend):
             await redis.zadd(self._key("pending"), {job.id: -job.priority})
         logger.debug("Enqueued job %s", job.id)
 
+    async def _promote_delayed(self) -> None:
+        """Move delayed jobs whose scheduled time has passed into the pending set."""
+        redis = await self._get_redis()
+        now = time.time()
+        ready_ids = await redis.zrangebyscore(self._key("delayed"), 0, now)
+        if not ready_ids:
+            return
+        for job_id in ready_ids:
+            await redis.zrem(self._key("delayed"), job_id)
+            data = await redis.hget(self._key("jobs"), job_id)
+            if data:
+                job = Job.from_dict(json_loads(data))
+                await redis.zadd(self._key("pending"), {job_id: -job.priority})
+
     async def dequeue(self) -> Optional[Job]:
         redis = await self._get_redis()
+        await self._promote_delayed()
         result = await redis.zpopmin(self._key("pending"), count=1)
         if not result:
             return None
@@ -351,7 +468,7 @@ class RedisQueue(QueueBackend):
             await self._redis.aclose()
             self._redis = None
 
-    async def __aenter__(self) -> "RedisQueue":
+    async def __aenter__(self) -> RedisQueue:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -372,9 +489,17 @@ class Queue:
         await queue.enqueue("send_email", to="user@example.com", subject="Hello")
     """
 
-    def __init__(self, backend: Optional[QueueBackend] = None) -> None:
+    def __init__(
+        self,
+        backend: Optional[QueueBackend] = None,
+        retry_backoff: float = 1.0,
+        dead_letter_handler: Optional[Callable] = None,
+    ) -> None:
         self._backend = backend or MemoryQueue()
         self._handlers: Dict[str, Callable] = {}
+        self._retry_backoff = retry_backoff
+        # Called with the failed Job once retries are exhausted.
+        self._dead_letter_handler = dead_letter_handler
 
     @property
     def backend(self) -> QueueBackend:
@@ -385,7 +510,7 @@ class Queue:
         def decorator(func: Callable) -> Callable:
             handler_name = name or f"{func.__module__}.{func.__qualname__}"
             self._handlers[handler_name] = func
-            func._queue_name = handler_name
+            func._queue_name = handler_name  # type: ignore[attr-defined]
             return func
         return decorator
 
@@ -467,7 +592,7 @@ class Queue:
             job.retry_count += 1
             if job.retry_count <= job.max_retries:
                 job.status = JobStatus.RETRY
-                delay = min(2 ** job.retry_count, 60)
+                delay = min(self._retry_backoff * (2 ** job.retry_count), 60)
                 job.delay = delay
                 logger.warning(
                     "Job %s failed (retry %d/%d in %.1fs): %s",
@@ -480,9 +605,25 @@ class Queue:
                 job.error = str(e)
                 job.completed_at = time.time()
                 logger.error("Job %s failed permanently: %s", job.id, e)
+                await self._handle_dead_letter(job)
 
         await self._backend.update_job(job)
         return job
+
+    async def _handle_dead_letter(self, job: Job) -> None:
+        """Invoke the configured dead-letter handler for a permanently failed job.
+
+        The handler may be sync or async; failures inside it are logged but
+        never raised, so they cannot break the worker loop.
+        """
+        if self._dead_letter_handler is None:
+            return
+        try:
+            result = self._dead_letter_handler(job)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            logger.error("Dead-letter handler failed for job %s: %s", job.id, e)
 
     async def get_job(self, job_id: str) -> Optional[Job]:
         return await self._backend.get_job(job_id)

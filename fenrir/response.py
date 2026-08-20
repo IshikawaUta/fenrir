@@ -1,11 +1,13 @@
 import mimetypes
 import os
-from typing import AsyncGenerator, AsyncIterable, Callable, Dict, Any, Generator, Iterable, Optional, Union, List, Tuple
 from http.cookies import SimpleCookie
+from typing import Any, AsyncGenerator, AsyncIterable, Callable, Dict, Generator, Iterable, List, Optional, Tuple, Union
+
+from fenrir.compat import _thread_pool
 
 # Import orjson via fenrir.json
-from fenrir.json import _orjson, _HAS_ORJSON
-from fenrir.compat import _thread_pool
+from fenrir.json import _HAS_ORJSON, _orjson
+
 
 class Response:
     def __init__(
@@ -22,13 +24,24 @@ class Response:
         # Case-insensitive check (Content-Type vs content-type)
         if content_type and not any(k.lower() == "content-type" for k in self.headers):
             self.headers["content-type"] = content_type
-        
+
         if isinstance(body, str):
             self._body = body.encode("utf-8")
         else:
             self._body = body
-            
-        self.cookies = SimpleCookie()
+
+        # SimpleCookie is created lazily (most responses never set cookies)
+        self._cookies: Optional[SimpleCookie] = None
+
+    @property
+    def cookies(self) -> SimpleCookie:
+        if self._cookies is None:
+            self._cookies = SimpleCookie()
+        return self._cookies
+
+    @cookies.setter
+    def cookies(self, value: Any) -> None:
+        self._cookies = value
 
     @property
     def status(self) -> int:
@@ -82,12 +95,12 @@ class Response:
     @property
     def media(self) -> Any:
         try:
-            from fenrir.context import current_app
+            from fenrir.context import _app_ctx_var
             try:
-                app = current_app._get_current_object()
-            except RuntimeError:
+                app = _app_ctx_var.get()
+            except LookupError:
                 app = None
-            
+
             if app is not None and hasattr(app, "json"):
                 return app.json.loads(self._body.decode("utf-8"))
             if _HAS_ORJSON:
@@ -99,12 +112,12 @@ class Response:
 
     @media.setter
     def media(self, value: Any):
-        from fenrir.context import current_app
+        from fenrir.context import _app_ctx_var
         try:
-            app = current_app._get_current_object()
-        except RuntimeError:
+            app = _app_ctx_var.get()
+        except LookupError:
             app = None
-            
+
         if app is not None and hasattr(app, "json"):
             dumped = app.json.dumps(value)
         elif _HAS_ORJSON:
@@ -114,7 +127,7 @@ class Response:
         else:
             import json
             dumped = json.dumps(value)
-            
+
         self._body = dumped.encode("utf-8") if isinstance(dumped, str) else dumped
         self.headers["content-type"] = "application/json"
 
@@ -158,7 +171,7 @@ class Response:
         headers_list = []
         for k, v in self.headers.items():
             headers_list.append((k.encode("latin1"), v.encode("latin1")))
-        
+
         # Add set-cookie headers
         cookie_output = self.cookies.output()
         if cookie_output:
@@ -166,34 +179,29 @@ class Response:
                 if line.startswith("Set-Cookie: "):
                     cookie_val = line[len("Set-Cookie: "):]
                     headers_list.append((b"set-cookie", cookie_val.encode("latin1")))
-        
+
         return headers_list
 
 
 class JSONResponse(Response):
     def __init__(self, content: Any, status: int = 200, headers: Dict[str, str] = None):
-        # Try custom JSON provider first (supports custom serializers)
-        from fenrir.context import current_app
+        # Fast path: default provider with orjson serializes straight to bytes,
+        # avoiding a str decode + re-encode round trip per response.
+        from fenrir.context import _app_ctx_var
+        from fenrir.json import DefaultJSONProvider, json_dumps_bytes
         try:
-            app = current_app._get_current_object()
-        except RuntimeError:
+            app = _app_ctx_var.get()
+        except LookupError:
             app = None
-            
-        if app is not None and hasattr(app, "json"):
-            body = app.json.dumps(content)
+
+        provider = getattr(app, "json", None) if app is not None else None
+        if provider is not None and not isinstance(provider, DefaultJSONProvider):
+            body = provider.dumps(content)
             if isinstance(body, str):
-                body = body.encode("utf-8")
-        elif _HAS_ORJSON:
-            # Fast path: use orjson directly to bytes (avoids double encode/decode)
-            body = _orjson.dumps(content)
-            if not isinstance(body, bytes):
                 body = body.encode("utf-8")
         else:
-            from fenrir.json import DefaultJSONProvider
-            body = DefaultJSONProvider(None).dumps(content)
-            if isinstance(body, str):
-                body = body.encode("utf-8")
-            
+            body = json_dumps_bytes(content)
+
         super().__init__(
             body=body,
             status=status,

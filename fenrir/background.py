@@ -20,10 +20,10 @@ Usage::
 """
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 from typing import Any, Callable, List
+
 from fenrir.compat import to_thread
 
 logger = logging.getLogger("fenrir.background")

@@ -6,7 +6,6 @@ with ETag, If-Modified-Since, and directory traversal protection.
 """
 from __future__ import annotations
 
-import asyncio
 import mimetypes
 import os
 import stat
@@ -56,7 +55,6 @@ class StaticFiles:
         # Normalize and resolve (use realpath to follow symlinks)
         resolved = os.path.realpath(os.path.join(self.directory, rel))
         # Security: must stay within directory
-        dir_prefix = self.directory.rstrip(os.sep) + os.sep
         real_directory = os.path.realpath(self.directory)
         if not (resolved == real_directory or resolved.startswith(real_directory + os.sep)):
             return None

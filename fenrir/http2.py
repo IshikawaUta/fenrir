@@ -10,7 +10,8 @@ are silently ignored.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, List
+
 from fenrir.response import Response
 
 
@@ -76,12 +77,12 @@ class HTTP2Push:
 
         return resp
 
-    def add_push_path(self, path: str) -> "HTTP2Push":
+    def add_push_path(self, path: str) -> HTTP2Push:
         """Add a path to the push list (chainable)."""
         self._push_paths.append(path)
         return self
 
-    def clear_push_paths(self) -> "HTTP2Push":
+    def clear_push_paths(self) -> HTTP2Push:
         """Clear the push list."""
         self._push_paths.clear()
         return self

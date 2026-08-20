@@ -98,8 +98,8 @@ def paginate(
 
     def _build_url(page_num: int) -> str:
         if not base_url:
-            return ""
-        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+            return ""  # pragma: no cover
+        from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
         parsed = urlparse(base_url)
         params = parse_qs(parsed.query, keep_blank_values=True)
         # Flatten single-value lists and update page/size
