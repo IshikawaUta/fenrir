@@ -4,12 +4,16 @@
 
 # Fenrir Web Framework
 
-[![PyPI version](https://img.shields.io/pypi/v/fenrir-framework.svg?color=blueviolet)](https://pypi.org/project/fenrir-framework/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/Tests-1536%20Passed-brightgreen.svg)](https://github.com/IshikawaUta/fenrir/actions)
-[![CI](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
-[![Performance](https://img.shields.io/badge/Performance-High--Speed%20ASGI-orange.svg)]()
+[![PyPI - Version](https://img.shields.io/pypi/v/fenrir-framework.svg)](https://pypi.org/project/fenrir-framework/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/fenrir-framework.svg)](https://pypi.org/project/fenrir-framework/)
+[![License: MIT](https://img.shields.io/pypi/l/fenrir-framework.svg)](LICENSE)
+[![Tests](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml/badge.svg)](https://github.com/IshikawaUta/fenrir/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/IshikawaUta/fenrir/branch/main/graph/badge.svg)](https://codecov.io/gh/IshikawaUta/fenrir)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/IshikawaUta/fenrir?utm_source=badge)
+[![Security](https://img.shields.io/badge/%F0%9F%8C%88-zizmor-white?labelColor=white)](https://zizmor.sh/)
+[![Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Mypy](https://img.shields.io/badge/typing-mypy-2A6DB2.svg)](https://github.com/python/mypy)
+[![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED.svg)](https://github.com/IshikawaUta/fenrir/pkgs/container/fenrir)
 
 **Fenrir** is a state-of-the-art, high-performance, hybrid Python web framework built on top of modern ASGI specifications. It elegantly merges the best programming paradigms from Python's most popular web frameworks (**Flask**, **FastAPI**, **Sanic**, **Falcon**, and **Bottle**) into a single unified workspace, powered locally by the premium **Asteri** application server.
 
@@ -25,10 +29,15 @@ Install directly from **PyPI**:
 pip install fenrir-framework
 ```
 
-Or install with Redis support for distributed sessions and rate limiting:
+Optional extras:
 
 ```bash
-pip install fenrir-framework[redis]
+pip install fenrir-framework[redis]      # Redis sessions & rate limiting
+pip install fenrir-framework[orm]        # SQLite + PostgreSQL ORM (aiosqlite, asyncpg)
+pip install fenrir-framework[graphql]    # Strawberry GraphQL support
+pip install fenrir-framework[grpc]       # gRPC server/client support
+pip install fenrir-framework[testing]    # HTTPX-based TestClient / fenrir bench
+pip install fenrir-framework[all]        # everything above
 ```
 
 Or install in development mode by cloning the repository:
@@ -36,7 +45,7 @@ Or install in development mode by cloning the repository:
 ```bash
 git clone https://github.com/IshikawaUta/fenrir.git
 cd fenrir
-pip install -e .
+pip install -e ".[all]"
 ```
 
 ---
@@ -104,7 +113,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.1.2")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.2.0")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -232,7 +241,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v4.1.2 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.2.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -376,6 +385,314 @@ async def upload(request: Request):
 
 ---
 
+## 🗄️ ORM
+
+A lightweight async ORM for SQLite/PostgreSQL (aiosqlite/asyncpg) with
+metaclass-based models, chained query filtering, ordering, and
+SQL-injection-safe queries.
+
+```python
+from fenrir import Fenrir
+from fenrir.orm import Database, Integer, Model, String
+
+app = Fenrir()
+
+class User(Model):
+    __tablename__ = "users"
+    id = Integer(primary_key=True)
+    name = String(max_length=100)
+    email = String(max_length=255, unique=True)
+
+db = Database("sqlite:///app.db")   # or "postgresql://user:pass@host/db"
+User.bind(db)
+await db.create_all()
+
+@app.get("/users/<int:user_id>")
+async def get_user(user_id: int):
+    user = await User.get(id=user_id)
+    return {"user": user.to_dict() if user else None}
+
+@app.get("/users")
+async def list_users():
+    return {"users": [u.to_dict() for u in await User.all()]}
+```
+
+Classmethods on models: `create`, `get`, `get_or_create`, `all`, `filter`,
+`count`, `bulk_create`; `filter()`/`exclude()`/`order_by()`/`limit()`/`offset()`
+chain into async terminators `all()`, `first()`, `count()`, `delete()`,
+`update(**kwargs)`. Models support `auto_now`/`auto_now_add` datetime fields,
+JSON fields, `save()`/`delete()`/`to_dict()` on instances, and transactions
+via `async with db.transaction():`.
+
+---
+
+## 💾 Caching
+
+Built-in caching with pluggable backends — `MemoryCache` (LRU + TTL),
+`RedisCache` (uses SCAN, not KEYS), and `FileCache` (atomic writes).
+
+```python
+from fenrir import Fenrir
+from fenrir.cache import Cache, MemoryCache
+
+app = Fenrir()
+cache = Cache(backend=MemoryCache(max_size=1000))
+
+@app.get("/cached")
+async def cached():
+    value = await cache.get("key")
+    if value is None:
+        value = await compute_expensive_thing()
+        await cache.set("key", value, ttl=60)
+    return {"value": value}
+```
+
+---
+
+## 📋 Queues & Jobs
+
+Background job queue with retry/backoff/priority/timeout and a worker pool,
+backed by `MemoryQueue` or `RedisQueue`.
+
+```python
+from fenrir import Fenrir
+from fenrir.queue import Queue, Worker
+
+app = Fenrir()
+queue = Queue()
+
+@queue.handler("send_email")
+async def send_email(email: str):
+    # send the email ...
+    return {"sent_to": email}
+
+@app.get("/enqueue")
+async def enqueue():
+    job = await queue.enqueue("send_email", email="a@b.com", max_retries=3)
+    return {"job_id": job.id}
+
+Worker(queue).start()   # processes jobs concurrently
+```
+
+Register job functions with the `@queue.handler("name")` decorator. Jobs
+support retry with exponential backoff, priority ordering, timeouts, delays,
+and cancellation.
+
+---
+
+## 🔐 Sessions
+
+Flask-style `session` context-local backed by `InMemorySessionInterface`
+(default) or `RedisSessionInterface` for distributed deployments.
+
+```python
+import redis.asyncio as aioredis
+from fenrir import Fenrir, session
+from fenrir.sessions import RedisSessionInterface
+
+app = Fenrir()
+app.config["SECRET_KEY"] = "change-me"                 # strong random value in prod
+app.session_interface = RedisSessionInterface(
+    redis_client=aioredis.from_url("redis://localhost:6379"),
+    prefix="fenrir:",
+)
+
+@app.get("/login")
+async def login():
+    session["user"] = {"id": 1}
+    return {"ok": True}
+```
+
+`SESSION_COOKIE_SECURE`, `SESSION_COOKIE_HTTPONLY`, `SESSION_COOKIE_SAMESITE`,
+and `SESSION_COOKIE_NAME` are configured via `app.config[...]` (secure cookies
+are enabled by default).
+
+---
+
+## 📢 Signals
+
+A Flask-like signal system with named signals, sender filtering, and
+sync/async receivers.
+
+```python
+from fenrir import Fenrir
+from fenrir.signals import Namespace
+
+app = Fenrir()
+ns = Namespace()
+user_created = ns.signal("user-created")
+
+@user_created.connect
+async def on_user_created(sender, **kwargs):
+    print("New user:", kwargs["user"])
+
+user_created.send(sender=app, user={"id": 1})   # sync; receivers may be async
+```
+
+---
+
+## 📑 Pagination
+
+`paginate()` wraps any sequence into a standardized paginated envelope with
+`total`, `page`, `size`, `pages`, `has_next`/`has_prev`, and link URLs.
+
+```python
+from fenrir import Depends
+from fenrir.pagination import PaginationParams, paginate
+
+@app.get("/items")
+async def items(page: PaginationParams = Depends(PaginationParams)):
+    rows = await fetch_all_rows()          # your query
+    return paginate(rows, page=page.page, size=page.size, base_url="/items")
+```
+
+---
+
+## 🧰 Helpers
+
+URL generation and file responses:
+
+```python
+from fenrir import Fenrir, redirect, send_file, send_from_directory, url_for
+
+app = Fenrir()
+
+@app.get("/users/<int:uid>")
+async def profile(uid: int):
+    return {"profile": uid}
+
+@app.get("/go")
+async def go():
+    return redirect(url_for("profile", uid=42))       # → /users/42
+
+@app.get("/download")
+async def download():
+    return send_file("reports.pdf", as_attachment=True, download_name="report.pdf")
+
+@app.get("/static/<path:path>")
+async def static_files(path: str):
+    return send_from_directory("public", path)
+```
+
+---
+
+## 🚦 HTTP Exceptions
+
+Rich HTTP exception hierarchy that can be raised or returned; each carries an
+HTTP status code and description.
+
+```python
+from fenrir import Fenrir, HTTPBadRequest, HTTPForbidden, HTTPNotFound
+
+@app.get("/secure/<int:uid>")
+async def secure(uid: int):
+    if uid != 1:
+        raise HTTPForbidden("You cannot access this resource.")
+    return {"uid": uid}
+
+@app.get("/missing")
+async def missing():
+    raise HTTPNotFound("This page does not exist.")
+```
+
+Catch exceptions with `@app.exception(...)` to return custom responses.
+
+---
+
+## 🗂️ Class-Based Views
+
+`View` and `MethodView` base classes for organizing handlers by HTTP method.
+
+```python
+from fenrir import Fenrir, request
+from fenrir.views import MethodView
+
+app = Fenrir()
+
+class UserView(MethodView):
+    async def get(self, user_id: int):
+        return {"method": "GET", "user_id": user_id}
+    async def post(self):
+        return {"method": "POST", "body": request.json}
+
+app.add_route("/users/<int:user_id>", UserView())
+```
+
+---
+
+## 📦 Response Classes
+
+Explicit response types for streaming, files, redirects, and raw bodies:
+
+```python
+from fenrir import (
+    Fenrir, FileResponse, HTMLResponse, JSONResponse, PlainTextResponse,
+    RedirectResponse, StreamingResponse,
+)
+
+app = Fenrir()
+
+@app.get("/json")
+async def json_route():
+    return JSONResponse({"ok": True})
+
+@app.get("/html")
+async def html_route():
+    return HTMLResponse("<h1>Hello</h1>")
+
+@app.get("/text")
+async def text_route():
+    return PlainTextResponse("plain text")
+
+@app.get("/stream")
+async def stream_route():
+    return StreamingResponse(iter(b"chunk"))
+
+@app.get("/old")
+async def old_route():
+    return RedirectResponse("/new", status_code=301)
+```
+
+---
+
+## 🧪 Testing
+
+Use the built-in `TestClient` (HTTPX-based) for in-process ASGI testing:
+
+```python
+import pytest
+from myapp import app   # your Fenrir app
+
+@pytest.mark.anyio
+async def test_home():
+    async with app.test_client() as client:
+        r = await client.get("/")
+        assert r.status_code == 200
+```
+
+`TestClient`/`FenrirTestClient` are available as `fenrir.TestClient` and
+`from fenrir.testing import FenrirTestClient`. Requires the `testing` extra
+(`pip install fenrir-framework[testing]`).
+
+---
+
+## 🔧 Environment Variables
+
+Fenrir reads a `.env` file via `python-dotenv`. Core variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `SECRET_KEY` | Secret key used to sign sessions/CSRF tokens. **Set a strong random value in production.** |
+| `MONITORING_ENABLED` | Enable (`true`/`false`) the built-in monitoring dashboard. |
+| `MONITORING_USER` | Monitoring dashboard username (default `admin`). |
+| `MONITORING_PASSWORD` | Monitoring dashboard password (default `changeme`). |
+| `MONITORING_SECRET_KEY` | Secret key for monitoring dashboard auth. |
+| `MONITORING_SITES` | Comma-separated URLs for the monitoring health checks. |
+
+See `.env.example` for the full template.
+
+---
+
 ## 💻 CLI Command Reference
 
 Fenrir comes packed with a high-fidelity, visually rich command-line tool. Start the CLI by executing `fenrir` or `python -m fenrir.cli`.
@@ -476,457 +793,90 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **1536 tests** validating every single component, including the new trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard (including uptime, response time history, hourly traffic, and summary endpoints), dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, and all v4.1.2 improvements. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**.
+Fenrir is thoroughly covered by an automated test suite comprising **2,353 tests** (plus 6 intentional skips) validating every single component: trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard, dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, CLI tooling, and the built-in monitoring dashboard.
+
+**Coverage**: **99%** overall (8,103 statements, 2,756 branches) — every `fenrir` module at 100%. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**, with ruff linting, mypy type-checking, and the coverage report uploaded to **Codecov**.
 
 Run the test suite locally:
 
 ```bash
-PYTHONPATH=. pytest -v
+PYTHONPATH=. pytest -q
 ```
 
 ### Output:
 ```text
-================================ 1536 passed, 1 skipped in 39.86s ================================
+=============================== 2353 passed, 6 skipped in 412s ================================
 ```
 
----
+### Performance & Benchmarking
 
-## 🔄 Changelog
+- **`benchmark.py`** — in-process comparison of Fenrir vs FastAPI vs Flask vs Falcon vs Sanic (import time, routing, JSON serialization, and ASGI request throughput). Run it in CI via the **Benchmark** workflow (results posted to the job summary) or locally with `python benchmark.py`.
+- **CodSpeed** — micro-benchmarks in `tests/benchmarks/` (JSON serialization, router static/parametric/miss matching) track performance regressions on every PR via the **CodSpeed** workflow. Run them locally with:
+  ```bash
+  pip install pytest-codspeed
+  pytest tests/benchmarks --codspeed
+  ```
+- **`fenrir bench`** — quick in-memory benchmark of your own app over ASGI (requires the `testing` extra):
+  ```bash
+  fenrir bench demo_app:app -i 1000 -t 5 -p / -m GET
+  ```
 
-### v4.1.2 — Fix Python 3.8 CI Hang
+### CI / CD
 
-**Bug Fixes (1):**
-- **CRITICAL**: Fixed Python 3.8 CI job hanging indefinitely after all 1,536 tests pass
-  - Root cause: `loop.run_in_executor(None, ...)` creates `ThreadPoolExecutor` attached to event loop; after loop closes, threads stay alive; Python's `atexit` handler `_python_exit` tries `t.join()` → hang
-  - Solution: dedicated module-level `_thread_pool = ThreadPoolExecutor(max_workers=None)` with `atexit` + `shutdown(wait=False)` for clean exit
-  - Updated all `run_in_executor(None, ...)` calls in `compat.py`, `sse.py`, `response.py` to use `_thread_pool`
-  - Removed fakeredis special case in `sessions.py` `_run_sync_or_async`
-  - Added executor shutdown in `tests/conftest.py` before loop close
-  - Added `asyncio.set_event_loop(None)` in `tests/test_cache_redis.py` and `tests/test_queue_redis.py`
+| Workflow | Purpose |
+| --- | --- |
+| `test.yml` | ruff + mypy lint; full suite with coverage on Python 3.8–3.13; Codecov upload |
+| `codspeed.yml` | CodSpeed performance regression tracking |
+| `benchmark.yml` | runs `benchmark.py` and posts results to the job summary |
+| `zizmor.yml` | security audit of the GitHub Actions workflows themselves |
+| `release.yml` | auto-creates a GitHub Release from the matching `CHANGELOG.md` section on `v*` tag push |
+| `docker.yml` | builds and pushes multi-arch (amd64/arm64) images to GHCR |
+| `publish.yml` | publishes wheels/sdist to PyPI on release (trusted publishing) |
 
-**Performance Impact:** None — `max_workers=None` matches Python's default executor behavior (zero overhead)
-
-**Test Results:** 1,160 tests pass locally (1,114 + 46), process exits cleanly with no hang
-
-### v4.1.1 — Bug Fixes, Performance & Test Coverage
-
-**Bug Fixes (90+):**
-- **CRITICAL (5)**: CSRF timing attack (secrets.compare_digest), CSRF cookie overwrite prevention, RateLimit deque optimization, ResponseCache infinite scan fix, context reset crash guard
-- **HIGH (9)**: CSRF HMAC token generation/verification, CORS preflight 204 response, RedisSession event loop handling, FileCache async I/O blocking, dispatch null guard, ORM executemany transaction respect, CLI ImportError handling, asteri optional dependency, forbidden path validation
-- **MEDIUM (18)**: Blueprint path validation, middleware_type ValueError, ORM table name sanitization, filename null byte removal, pagination zero/negative size protection, signals copy protection, SSE sync generator threading fix, GraphQL context non-dict handling, OpenAPI Union/Optional/List fix
-- **LOW (2)**: Response status ValueError fix, teardown error logging
-
-**Performance Optimizations (27):**
-- JSONResponse: orjson fallback + custom provider first
-- Request: lazy parsing headers/cookies/query params
-- Response: case-insensitive Content-Type header check
-- Middleware: pre-encode CORS header names to bytes
-- Routing: cache is_coroutinefunction at Route registration (_is_async)
-- Dependencies: cache async status per function (_dep_is_async_cache, bounded 1024)
-- Signals: cache receiver async status (_receiver_is_async_cache, bounded 1024)
-- Background: cache async status at BackgroundTask creation
-- _app_dispatch: hoist imports to module level, remove redundant context var set, cache listener async status (_listener_is_async_cache, bounded 1024)
-- Static: async stat + file read via to_thread, LRU cache mimetypes, removed dead _stat_cache
-- Request: cache host property lookup (_host attribute)
-
-**Python 3.8 Compatibility:**
-- fenrir.compat.to_thread shim for loop.run_in_executor
-- Deferred Lock creation in RateLimitMiddleware and Database (_get_lock())
-
-**Test Coverage: 1,536 tests** (up from 1,331)
-- helpers.py: url_for, redirect, send_file, send_from_directory (27 tests)
-- exceptions.py: HTTP exception hierarchy (26 tests)
-- websocket.py: send_json, close, timeout, receive_text/receive_bytes (52 tests)
-- pool.py: validation, idle timeout, concurrent acquire, DatabasePool (137 tests)
-- background.py: exception logging, sync/async tasks (44 tests)
-- compat.py: WsgiToAsgi edge cases (88 tests)
-- testing.py: FenrirTestClient lifecycle (61 tests)
-- cli.py: print_banner, format_col, load_app, _update_env_var (20 tests)
-
-**Release Notes:**
-- Version bumped to 4.1.1 after comprehensive bug fixes and test coverage improvements
-- All critical security and performance optimizations from deep-check implementation
-- Test suite expanded to cover previously untested modules with 1,536 passing tests
-- Maintains Python 3.8-3.13 compatibility with fenrir.compat.to_thread shim
-
-### v4.1.0 — Bug Fixes, Performance & Test Coverage
-
-**Bug Fixes (56)**
-
-- **CRITICAL (5)**: CSRF token HMAC predictable randomness, CORS duplicate branches, RateLimit TOCTOU race condition, BodyLimit double response, config.py exec() path traversal
-- **HIGH (9)**: RateLimit asyncio.Lock → deque, MemoryQueue unbounded cleanup, ORM ORDER BY column_name, PostgreSQL INSERTRETURNING, monitoring default password rejection, SSRF validation, graphql.py JSONResponse status_code, graphql.py sync context_factory
-- **MEDIUM (18)**: CORS headers, BodyLimit body drain, sessions.py event loop crash, plugins.py lazy import validation, monitoring/routes.py logout GET → POST CSRF, _app_dispatch.py duplicate response_model, ORM transaction() context manager, cache.py cached decorator exists() check
-- **LOW (14+)**: context.py RequestContext leak, testing.py follow_redirects, helpers.py url_for WebSocket, sse.py sync generator blocking, pool.py lock None guard, openapi.py HEAD filter, monitoring HTML injection
-
-**Performance Optimizations (12)**
-
-- FileResponse stream_body with run_in_executor for non-blocking I/O
-- is_falcon_resource() cached at route init for faster detection
-- TypeAdapter cache per annotation in dependencies for faster validation
-- URLSafeTimedSerializer cache in sessions for faster serialization
-- ORM field_index_map O(1) lookup instead of O(n) list.index()
-- deque for RateLimit instead of list filter for O(1) popleft
-- Redis aclose() and set(ex=ttl) deprecation fixes
-- LruCache.popitem() O(1) for cache eviction
-- transaction() context manager for ORM batched commits
-- Import hot path dedup in _app_dispatch.py
-- Lazy imports cached for BackgroundTasks, UploadFile, current_app
-- linecache for debug source inspection
-
-**Deprecation Fixes (3)**
-
-- RedisQueue close() → aclose() (aioredis deprecation)
-- RedisCache close() → aclose() (aioredis deprecation)
-- RedisCache setex() → set(ex=ttl) (redis-py deprecation)
-
-**Test Coverage: 76% → 83% (1331 tests)**
-
-- graphql.py: 32% → 92% (19 new tests)
-- grpc.py: 49% → 70% (24 new tests)
-- upload.py: 54% → 100% (15 new tests)
-- templating.py: 65% → 100% (12 new tests)
-- orm.py: 64% → 71% (32 new tests)
-- signals.py: 71% → 96% (19 new tests)
-- cache.py: 52% → 91% (50 new tests)
-- plugins.py: 63% → 86% (77 new tests)
-- performance.py: 0% → 85% (51 new tests)
-- queue.py: 47% → 94% (47 new tests)
-- cli.py: 44% → 68% (17 new tests)
-
-**Benchmark: 5-Framework Comparison**
-
-- Fenrir wins Import Time (108ms vs FastAPI 1013ms) and Route Registration (59ms vs FastAPI 299ms)
-- Falcon wins Throughput (3419 req/s) and Import Time in some runs
-- FastAPI wins App Init (0.64ms)
-- Fenrir overall winner with 2/5 categories
-
-**Security Fixes**
-
-- Hardcoded API key in demo_app.py → environment variable API_KEY
-- Default password "changeme" → rejection with warning
-- SSRF validation for monitoring health checks
-- CSRF token now uses cryptographically secure random (secrets.token_hex)
-- Monitoring dashboard logout changed from GET to POST for CSRF protection
-- Site health bypass SSRF for user-configured sites only
-
-**Compatibility**
-
-- MemoryQueue lazy init asyncio.PriorityQueue for Python 3.9 compatibility
-- fakeredis fixtures with proper event loop setup for Python 3.9
-
-### v4.0.0 — Production-Ready Major Release
-
-**New Features:**
-- **Plugin System** (`fenrir/plugins.py`): PluginRegistry with version compatibility, dependency resolution (circular detection), config validation, hot-reload, auto-discovery via entry points, health monitoring, namespace isolation, thread-safety
-- **Hook/Extension Points** (`fenrir/hooks.py`): HookRegistry with priority ordering, one-time hooks, wildcard hooks, async/sync support, middleware integration, hook cancellation
-- **Lightweight ORM** (`fenrir/orm.py`): Database (SQLite/PostgreSQL), Model with metaclass, Field types, QuerySet with filters/ordering/limit/offset, parameterized queries, SQL injection prevention
-- **Caching System** (`fenrir/cache.py`): MemoryCache (LRU + TTL), RedisCache (SCAN not KEYS), FileCache (atomic writes), prefix invalidation
-- **Queue/Job System** (`fenrir/queue.py`): Queue with handler registration, Job with retry/backoff/priority/timeout, Worker with concurrency, MemoryQueue and RedisQueue backends
-- **GraphQL Support** (`fenrir/graphql.py`): GraphQLRouter with strawberry-graphql integration, GraphiQL playground
-- **gRPC Support** (`fenrir/grpc.py`): GRPCServer, GRPCService, GRPCClient, GRPCContext, interceptors
-- **Performance Module** (`fenrir/performance.py`): ObjectPool, ResponseCache, PerformanceMonitor, optimize_app()
-- **orjson Integration**: All JSON serialization uses orjson (7x faster than stdlib json), with stdlib json fallback
-
-**Performance Optimizations:**
-- **Lazy imports**: Reduced import time from 681ms to 53ms (92% faster)
-- **orjson JSON serialization**: 7x faster than stdlib json (233ms vs 1652ms for 10000 ops)
-- **Centralized JSON helpers**: `json_dumps()`, `json_loads()`, `json_dumps_bytes()` in `fenrir/json.py`
-- **Benchmark results**: Fenrir wins 3/4 vs FastAPI (Import, Route Reg, Throughput)
-
-**Bug Fixes (29 total):**
-- **CRITICAL (2)**: Race condition `Database.connect()` with proper asyncio.Lock, SQL injection `QuerySet.update()` with field validation
-- **HIGH (4)**: Swallowed errors in `_app_dispatch.py` with logging, pool overflow in `pool.py` with semaphore inside lock, gRPC service registration, memory leak in queue cleanup
-- **MEDIUM (3)**: Session deadlock with separate thread event loop, one-time wildcard hook removal, redundant import json consolidation
-- **LOW (6)**: Dead code removal, SSE silent exception logging, delete_cookie expires fix, context.py do_teardown_request guard, send_file streaming, Model._meta mutable default
-
-**Architecture Improvements:**
-- **Python 3.8-3.13 Compatibility**: No match/case, no type|None syntax, no list[int] runtime hints
-- **Import Circular Free**: DAG import graph with lazy loading
-- **Thread Safety**: Proper locks for plugins (RLock), hooks (Lock), Redis queue (asyncio.Lock)
-
-**Tests:**
-- Added 126 new tests covering plugin system, hook system, ORM, cache, queue, GraphQL, gRPC, performance
-- Total test count: 874 (up from 748)
-
-### v3.1.3 — Dev Mode Debug Page & Error Handling
-
-**New Features:**
-- Laravel-style dev mode debug page (`--dev` flag or `FENRIR_DEV_MODE=1` env var)
-- Debug page with sidebar, tabs (Stack Trace / Request / Raw Trace), and collapsible frames
-- ASGI middleware errors now caught and displayed on debug page
-- Dev mode overrides custom exception handlers for full debug info
-- Client info detection: scope → X-Forwarded-For → X-Real-IP → Host header
-- XSS protection via `html.escape()` on all user-controlled values
-- Responsive design for mobile (768px and 480px breakpoints)
-- Vendor frame toggle with frame count
-
-**Bug Fixes:**
-- Fixed `dev_mode=False` overriding env var (changed default to `None`)
-- Fixed `os.environ` leak between tests in CLI
-- Fixed `html.escape()` crash on non-string detail (pydantic validation)
-
-**Tests:**
-- Added 42 new tests covering dev mode, ASGI middleware errors, responsive CSS, XSS, and client info
-- Total test count: 748 (up from 706)
-
-### v3.1.2 — Security & Bug Fix Release
-
-**Security Fixes:**
-- Fixed monitoring dashboard authentication bypass (token validation)
-- Added authentication to all monitoring API endpoints
-- Fixed XSS vulnerabilities in monitoring dashboard HTML output
-- Added CSRF protection on monitoring login form
-- Fixed OpenAPI Swagger/ReDoc XSS via `openapi_url` parameter
-- Fixed Content-Disposition header injection via unescaped filename
-- Added token expiration (24 hours) for monitoring sessions
-
-**Bug Fixes:**
-- Fixed `.env` file not loaded when running via `fenrir` CLI (vs `python -m fenrir.cli`)
-- Fixed `response-times` API endpoint passing wrong argument to function
-- Fixed `int()` conversion without error handling causing 500 errors
-- Fixed config environment vars ignored when `enabled=True` passed
-- Fixed `body.decode()` crash on non-UTF-8 request bodies
-- Fixed default secret key hardcoded (now generates random if not set)
-- Fixed JSONResponse import error when used outside request context
-- Fixed `session.pop()` always marking session as modified
-- Fixed Redis session async deadlock with proper timeout error
-- Fixed `_load_data()` overwriting sites configuration
-- Fixed CSRF cookie not being sent back (changed path to `/`)
-- Fixed CSRF token not refreshed on failed login attempts
-
-**Improvements:**
-- Added `html.escape()` for all monitoring dashboard HTML output
-- Added `try/except` for query parameter int conversions
-- Added Secure cookie flag support via `MONITORING_SECURE_COOKIES` env var
-- Added health check URL validation (only configured sites allowed)
-- Added error handling for disk write failures in monitoring data
-- Added warning when default password is used
-- Added parallel health checks using `asyncio.gather()`
-- Added JavaScript `escapeHtml()` for client-side DOM injection
-- Added `MONITORING_ALLOW_DEFAULT_PASSWORD` env var override
-- Added OSError handling for monitoring data directory creation
-- Added `send_file()` streaming for large files via `FileResponse`
-- Added `DefaultJSONProvider` fallback for `JSONResponse` outside request context
-
-**Tests:**
-- Added 37 new tests covering security fixes and edge cases
-- Fixed all test warnings (deprecated per-request cookies in httpx)
-- Total test count: 706 (up from 669)
-
-### v3.1.1 — Bug Fix Release
-
-**Bug Fixes:**
-- Fixed `fenrir.monitoring` subpackage not included in package distribution (`pyproject.toml` packages list)
-
-### v3.1.0 — Monitoring Features
-
-Added built-in monitoring dashboard:
-
-**New Features:**
-- Monitoring dashboard with health checks, traffic analysis, and alerts
-- CLI commands for enable/disable monitoring
-- bcrypt password hashing for secure authentication
-- Async health checks using thread pool
-- Uptime statistics endpoint (`/monitoring/api/uptime`)
-- Response time history endpoint (`/monitoring/api/response-times`)
-- Hourly traffic breakdown endpoint (`/monitoring/api/hourly`)
-- Comprehensive summary endpoint (`/monitoring/api/summary`)
-- Enhanced dashboard with uptime percentage display
-- `--disable-dashboard` flag for Asteri built-in dashboard
-
-**Bug Fixes:**
-- Fixed unused import in monitoring routes
-- Fixed invalid integer parsing in alerts API
-- Fixed blocking call in health check (now async)
-- Fixed Response constructor parameter mismatch
+All workflow actions are pinned to immutable commit SHAs and kept up to date by Dependabot.
 
 ---
 
-### v3.0.0 — Major Bug Fix & Architecture Release
+## 🐳 Docker
 
-Fixed 21 bugs, added 46 new tests, and introduced architecture improvements:
+An official runtime image is published to **GitHub Container Registry**:
+`ghcr.io/ishikawauta/fenrir`.
 
-**HIGH SEVERITY Fixes (7)**
-- Fixed `routing.py`: Converter keyword as param name producing `param_name=""`.
-- Fixed `routing.py`: `<path>` converter now recurses into child nodes at all possible depths, enabling routes like `/api/<path:resource>/details` to match correctly.
-- Fixed `app.py`: Global teardown functions no longer run twice — deduplication via `seen` set.
-- Fixed `app.py`: WebSocket handlers now properly set `_app_ctx_var` so `current_app` works inside websocket handlers.
-- Fixed `dependencies.py`: Plain default params (e.g. `page: int = 1`) now return the actual default value instead of `None`.
-- Fixed `dependencies.py`: `Annotated[T, Query()]` with function default now preserves the default value.
-- Fixed `compat.py`: WSGI response body iteration now runs in a thread executor via `run_in_executor`, preventing event loop blocking.
+```bash
+docker pull ghcr.io/ishikawauta/fenrir
 
-**MEDIUM SEVERITY Fixes (8)**
-- Fixed `app.py`: `_coerce_response` no longer infinitely recurses on 4+ element tuples — serializes as JSON array.
-- Fixed `app.py`: Streaming error now always sends `more_body=False` frame, ensuring complete ASGI responses.
-- Fixed `response.py`: `text` property returns `""` instead of `None` for empty bodies.
-- Fixed `security.py`: `HTTPDigest` now returns a parsed dict instead of raw header string.
-- Fixed `openapi.py`: Path parameter detection now checks both `param_name` and `alias`.
-- Fixed `pagination.py`: URL building now deduplicates query params using `urllib.parse` instead of blind appending.
-- Fixed `helpers.py`: `Content-Disposition` filename is now properly quoted.
-- Fixed `signals.py`: Async signal results are now collected as task objects.
+# Run the bundled demo app
+docker run -p 8000:8000 ghcr.io/ishikawauta/fenrir
 
-**LOW SEVERITY Fixes (6)**
-- Removed dead code `_WsgiMount` exception and `_wsgi_handler` from `app.py`.
-- Fixed unused `resp` variable in websocket path — now passed to `resolve_parameters`.
-- Removed dead code `regex_segments` from `routing.py` `RouteTrie.insert()`.
-- Fixed `templating.py`: Removed destructive `os.makedirs` side effect from `Jinja2Renderer.__init__`.
-- Fixed `context.py`: Added `hasattr` guard for `do_teardown_appcontext` in `AppContext.__exit__`.
-- Fixed `views.py`: `req.method` can no longer cause `AttributeError` — defaults to `"GET"` when `None`.
+# Run your own app (mount it at /app and point APP_MODULE at it)
+docker run -p 8000:8000 \
+  -e APP_MODULE=myapp:app \
+  -v "$PWD:/app" \
+  ghcr.io/ishikawauta/fenrir
+```
 
-**Architecture Improvements**
-- Added `BodyLimitMiddleware`: Rejects requests exceeding configurable max body size (default 10 MB), now enforces actual body size via chunk monitoring (not just Content-Length header).
-- Added `CSRFMiddleware`: CSRF token validation for state-changing HTTP methods, with automatic token generation and cookie injection (`auto_generate=True` by default).
-- Fixed `GZipMiddleware`: Streaming compression for `StreamingResponse` (on-the-fly chunk compression); fixed `_is_compressible()` to only compress explicit text-based types (was incorrectly compressing all `application/*` and `image/*`).
-- Added `inspect.signature()` caching via `_get_cached_signature()` in `dependencies.py`, now used by `resolve_parameters()` for optimal parameter resolution.
-- Added OpenAPI schema caching in `app.openapi()` — cached after first call, invalidated on route changes.
-- Fixed `CORSMiddleware`: Wildcard origin with credentials now echoes the specific origin per CORS spec.
-- Fixed `RateLimitMiddleware`: Redis backend now checks limit before adding request (matching in-memory behavior).
-- Fixed `app.py`: Lifespan handler now returns after startup failure instead of looping forever.
-
-**New Tests (46 tests)**
-- PATCH/PUT/DELETE method routing + 405 on wrong method (7 tests)
-- HTTPDigest auth parsing: success, missing header, wrong scheme, auto_error=False, field parsing (5 tests)
-- OAuth2AuthorizationCodeBearer: success, missing, auto_error=False (3 tests)
-- OpenIDConnect: success, missing, wrong scheme, auto_error=False, model (5 tests)
-- Rate limiting via Redis backend: under limit, over limit, different keys (3 tests)
-- GZip + streaming response (2 tests)
-- 4+ element tuple response coercion (4 tests)
-- Malformed JSON body + wrong content-type with strict mode (3 tests)
-- Lifespan scope handling: startup/shutdown, startup failure (2 tests)
-- CORS wildcard + credentials edge case (2 tests)
-- Signature caching verification (3 tests)
-- OpenAPI schema caching (2 tests)
-- CSRF middleware auto-token generation: GET sets cookie, POST without token rejected, POST with valid token accepted, auto_generate=False (4 tests)
-- GZip streaming compression: chunks compressed on-the-fly (1 test)
-
-### v2.3.5 — Bug Fix & Changelog Update
-- Updated changelog to accurately reflect version history
-- All version references synchronized across codebase
-
-### v2.3.4 — Bug Fix Release
-- Fix server crash: `fenrir run` was passing wrong `app_path` (`fenrir.app:_active_app`) to Asteri worker, causing `'NoneType' object is not callable`
-- Fix Python 3.8 support: replaced `asyncio.to_thread` with `fenrir.compat.to_thread` shim
-- Updated all version strings across codebase
-
-### v2.3.3 — 🚫 Retracted
-- Published with incomplete version updates, superseded by v2.3.4
-
-### v2.3.2 — Architecture & Performance Upgrade
-
-Major architecture improvements, new features, and performance optimizations:
-
-**Architecture Improvements**
-- **Trie-Based Routing**: Replaced O(n) linear route matching with O(k) trie-based routing. Route lookup now scales with path depth, not total route count.
-- **Context Vars Migration**: Removed `sys._fenrir_active_app` hack, replaced with proper `contextvars.ContextVar` for thread/async-task-safe app context.
-
-**New Components**
-- **Connection Pooling (`fenrir.pool`)**: Generic `ConnectionPool` and `DatabasePool` with health checks, retry logic, automatic connection recycling, and configurable pool sizes.
-- **HTTP/2 Push (`fenrir.http2`)**: `HTTP2Push` utility for server push with Link headers, auto-push decorators, and resource type guessing.
-- **WebSocket Authentication (`fenrir.security`)**: `WebSocketTokenAuth` dependency for token-based WebSocket authentication via headers or query parameters.
-
-**New Features**
-- **Streaming Request Body**: `request.stream_body()` method for memory-efficient processing of large uploads without buffering.
-- **Per-User Rate Limiting**: `key_func` parameter in `RateLimitMiddleware` for custom rate limiting keys (user ID, API key, etc.).
-- **Distributed Rate Limiting**: Redis backend support for `RateLimitMiddleware` using sliding window algorithm.
-
-**Performance Optimizations**
-- **GZip Compression Level**: Default `compresslevel` changed from 9 to 6 for optimal CPU/ratio trade-off.
-- **Redis Rate Limiter**: Uses `time.monotonic()` instead of `time.time()` for clock-safe operation, with unique IDs to prevent collisions.
-- **Deprecated API Fix**: Replaced deprecated `asyncio.get_event_loop()` with `asyncio.get_running_loop()` in WSGI adapter.
-
-**Bug Fixes**
-- Fixed missing `import sys` in `app.py` that silently broke root_path detection.
-- Fixed stale `sys._fenrir_active_app` references in `views.py` and `templating.py`.
-- Fixed inconsistent version strings across `pyproject.toml`, `__init__.py`, and `app.py`.
-- Fixed unused `import asyncio` in `falcon.py`.
-- Removed private `Semaphore._value` access from `Pool.stats`.
-
-**New Exports**
-- `RouteTrie`, `WebSocketTokenAuth`, `ConnectionPool`, `DatabasePool`, `HTTP2Push`
-
-### v2.2.2 — Major Feature Update
-
-New middleware, session backends, pagination, and more:
-
-**New Middleware (`fenrir.middleware`)**
-- **CORSMiddleware**: Full CORS support for HTTP and WebSocket with configurable origins, methods, headers, credentials, and max-age.
-- **GZipMiddleware**: Automatic gzip compression for responses above a configurable size threshold.
-- **RequestIDMiddleware**: Auto-generates unique request IDs or forwards client-provided IDs via configurable header.
-- **RateLimitMiddleware**: Sliding-window rate limiter per client IP with configurable limits and block status code.
-
-**New Session Backends (`fenrir.sessions`)**
-- **InMemorySessionInterface**: In-memory session storage with TTL expiration, suitable for single-process apps and testing.
-- **RedisSessionInterface**: Redis-backed session storage with support for both sync (`fakeredis`) and async (`redis.asyncio`) clients. Install with `pip install fenrir-framework[redis]`.
-
-**New Pagination Utilities (`fenrir.pagination`)**
-- **PaginationParams**: Pydantic model for query parameters (`page`, `page_size`, `sort_by`, `sort_order`).
-- **paginate()**: Utility to paginate SQLAlchemy-style query results with metadata.
-- **paginate_dict()**: Utility to paginate lists of dictionaries.
-
-**New Features**
-- **WebSocket per-route timeout**: `@app.websocket("/ws", timeout=5.0)` raises `WebSocketTimeout` if no message received within the timeout.
-- **Multiple response models per status**: `response_models={200: SuccessModel, 404: ErrorModel}` applies different models based on the actual response status code.
-
-**Improvements**
-- ASGI middleware stack is now built once and cached, with automatic invalidation when new middleware is added.
-- Zero deprecation warnings across the entire test suite (528 tests).
-
-### v1.2.2 — Logo & Favicon Patch
-
-High-quality logo assets and resolved CLI template favicon issues:
-
-- **High-Resolution Logo**: Updated `logo.png` asset to a high-fidelity image for sharper rendering in documentation and templates.
-- **Favicon Resolution**: Ensured favicon is correctly rendered and copied during project scaffolding (`fenrir new`) from the package assets.
-
-### v1.2.1 — Packaging & Asset Integration Patch
-
-Logo and favicon assets are now properly included in the package distribution:
-
-**Logo Asset Packaging**
-- **Issue**: `fenrir new` command failed to copy logo and favicon files when creating new projects outside the main repository.
-- **Root cause**: Logo files (`logo.png`, `logo.jpg`) were stored in the repository root, not within the `fenrir/` package directory, so they were not included when the package was installed via PyPI.
-- **Fix**: 
-  - Moved `logo.png` and `logo.jpg` from repository root to `fenrir/` package directory.
-  - Added `[tool.setuptools.package-data]` configuration in `pyproject.toml` to include image files: `fenrir = ["logo.png", "logo.jpg"]`.
-  - Updated `fenrir/cli.py` `cmd_new()` function to look for logos in the fenrir package directory first, with fallbacks for development mode.
-- **Result**: All tests pass (528 unit tests). `fenrir new` now works correctly in all environments.
-
-### v1.1.1 — Python 3.8–3.10 Full Compatibility Patch
-
-Five test failures on Python 3.8 CI were identified and patched:
-
-**1. `RuntimeError: Working outside of request context` (session, redirect in sync handlers)**
-- **Root cause**: `loop.run_in_executor()` does **not** propagate `contextvars` by default. Sync route handlers using `session[...]` or `redirect()` lost the request context when moved into the executor thread.
-- **Fix**: `fenrir/compat.py` — polyfill now calls `contextvars.copy_context().run(func)` instead of passing `func` directly to the executor.
-
-**2. `AssertionError: {'user': None} != {'user': 'Alice'}` (Annotated[str, Header()])**
-- **Root cause**: `typing.get_origin(typing_extensions.Annotated[...])` returns `None` on Python 3.8, so `Annotated` parameters were silently ignored during dependency resolution.
-- **Fix**: `fenrir/compat.py` — export `get_origin`/`get_args` from `typing_extensions` (which correctly handles its own `Annotated`). `fenrir/dependencies.py` and `fenrir/openapi.py` now import these from `fenrir.compat`.
-
-**3. `AssertionError: {'content_type': ''} != {'content_type': 'text/plain'}` (file upload)**
-- **Root cause**: `python-multipart < 0.0.21` (installed on Python 3.8–3.10 CI runners) did not pass `content_type` into `File.__init__`, so `file.content_type` did not exist.
-- **Fix**: `fenrir/request.py` — intercepts the parser's `on_header_field`/`on_header_value`/`on_headers_finished` callbacks to capture the `Content-Type` of each multipart part before the `File` object is constructed, and injects it as a fallback.
-
-**4. `AssertionError: 'target' == '/nested/target'` (relative redirect)**
-- Resolved as a side-effect of fix #1 (contextvars propagation restores `request.path` inside the executor thread).
-
-**5. CI timeout on Python 3.9 (gevent build)**
-- The Python 3.9 job was cancelled mid-build because compiling `gevent` took too long. This is an infrastructure concern, not a code issue; no code change required.
-
-### v1.1.0 — CI/CD & Centering Fix
-- Added **GitHub Actions** workflow for automated testing across Python 3.8–3.13.
-- Fixed centering of `PROJECT CREATED SUCCESSFULLY` badge and logo in scaffolded template.
-- Added **RFC 7231 HEAD** method compliance.
-- Added `itsdangerous` and `python-multipart` as explicit core dependencies.
-
-### v0.1.0 — Initial Release
-- Core ASGI framework with Flask, FastAPI, Sanic, Falcon, and Bottle hybridization.
-- 528 automated unit tests.
-- Premium CLI tooling (`run`, `routes`, `shell`, `bench`, `new`, `info`).
-- Auto-generated OpenAPI/Swagger documentation.
-- WebSocket and Server-Sent Events support.
+Configuration via environment variables: `APP_MODULE` (default `demo_app:app`),
+`HOST` (default `0.0.0.0`), `PORT` (default `8000`), `WORKERS` (default `1`).
+You can also pass an arbitrary command directly to the container. Build locally
+with `docker build -t fenrir .`.
 
 ---
+
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test, lint
+(`ruff`), type-check (`mypy`), and coverage instructions.
+
+## 🔒 Security
+
+Found a vulnerability? Please see [SECURITY.md](SECURITY.md) for our disclosure
+policy and how to report issues.
+
+## 📜 Code of Conduct
+
+Please note that this project is released with a
+[Contributor Code of Conduct](CODE_OF_CONDUCT.md). By participating you agree
+to abide by its terms.
 
 ## 📜 License
 
