@@ -1,8 +1,7 @@
 """Tests for StaticFiles ASGI application."""
-import time
 
-import pytest
 import httpx
+import pytest
 
 from fenrir import Fenrir
 from fenrir.static import StaticFiles
@@ -178,6 +177,7 @@ async def test_content_length(static_dir):
 async def test_integration_with_gzip(static_dir):
     """StaticFiles works with GZipMiddleware."""
     import gzip
+
     from fenrir.middleware import GZipMiddleware
 
     app = Fenrir()
@@ -231,3 +231,107 @@ async def test_head_request_no_body(static_dir):
         assert res.headers.get("content-length") == str(len(b"Hello, World!"))
         # httpx auto-decompresses, but body should be empty for HEAD
         assert res.text == ""
+
+
+async def _call_static(files, scope):
+    messages = []
+
+    async def send(msg):
+        messages.append(msg)
+
+    await files(scope, None, send)
+    return messages
+
+
+@pytest.mark.anyio
+async def test_non_http_scope(static_dir):
+    files = StaticFiles(directory=str(static_dir))
+    await files({"type": "websocket", "path": "/x"}, None, None)  # returns silently
+
+
+@pytest.mark.anyio
+async def test_traversal_direct(static_dir):
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/../../etc/passwd", "headers": [],
+    })
+    assert messages[0]["status"] == 404
+
+
+@pytest.mark.anyio
+async def test_html_index_subdir(static_dir):
+    (static_dir / "subdir" / "index.html").write_text("sub-index")
+    files = StaticFiles(directory=str(static_dir), html=True)
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/subdir", "headers": [],
+    })
+    assert messages[0]["status"] == 200
+
+
+@pytest.mark.anyio
+async def test_stat_oserror(static_dir, monkeypatch):
+    import os
+
+    import fenrir.static as smod
+
+    real_to_thread = smod.to_thread
+
+    async def fake_to_thread(func, *args, **kwargs):
+        if func is os.stat:
+            raise OSError("gone")
+        return await real_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(smod, "to_thread", fake_to_thread)
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
+    })
+    assert messages[0]["status"] == 404
+
+
+@pytest.mark.anyio
+async def test_directory_403(static_dir, monkeypatch):
+    import fenrir.static as smod
+
+    monkeypatch.setattr(smod.stat, "S_ISDIR", lambda mode: True)
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
+    })
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.anyio
+async def test_unknown_content_type(static_dir):
+    (static_dir / "blob.zzunknown").write_bytes(b"x")
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/blob.zzunknown", "headers": [],
+    })
+    headers = dict(messages[0]["headers"])
+    assert headers[b"content-type"] == b"application/octet-stream"
+
+
+@pytest.mark.anyio
+async def test_invalid_modified_since(static_dir):
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt",
+        "headers": [(b"if-modified-since", b"not-a-date")],
+    })
+    assert messages[0]["status"] == 200
+
+
+@pytest.mark.anyio
+async def test_file_read_oserror(static_dir, monkeypatch):
+    import builtins
+
+    def _raise(*args, **kwargs):
+        raise OSError("deleted")
+
+    monkeypatch.setattr(builtins, "open", _raise)
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
+    })
+    assert messages[-1]["more_body"] is False

@@ -1,6 +1,8 @@
-import pytest
 import httpx
-from fenrir import Fenrir, Depends
+import pytest
+
+from fenrir import Depends, Fenrir
+
 
 # Dependencies
 async def get_token():
@@ -13,7 +15,7 @@ def get_db(token: str = Depends(get_token)):
 @pytest.mark.anyio
 async def test_dependency_injection():
     app = Fenrir()
-    
+
     @app.get("/items")
     async def list_items(db: str = Depends(get_db)):
         return {"db": db}

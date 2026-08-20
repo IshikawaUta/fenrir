@@ -1,14 +1,14 @@
 """Tests for fenrir.cache — FileCache, Cache base."""
-import asyncio
-import json
-import os
-import time
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from fenrir.cache import (
-    CacheBackend, MemoryCache, FileCache, Cache,
-)
+from unittest.mock import patch
 
+import pytest
+
+from fenrir.cache import (
+    Cache,
+    CacheBackend,
+    FileCache,
+    MemoryCache,
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 # CacheBackend Base Tests

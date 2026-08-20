@@ -1,7 +1,10 @@
-import pytest
 import asyncio
+
+import pytest
+
 from fenrir import Fenrir
 from fenrir.websocket import WebSocket, WebSocketDisconnect
+
 
 @pytest.mark.anyio
 async def test_websocket_routing_and_echo():
@@ -34,7 +37,7 @@ async def test_websocket_routing_and_echo():
 
     # Simulate WebSocket handshakes and message exchange
     await receive_queue.put({"type": "websocket.connect"})
-    
+
     task = asyncio.create_task(app(scope, receive, send))
 
     # Expect accept
@@ -86,7 +89,7 @@ async def test_websocket_json():
 
     # Send JSON
     await receive_queue.put({"type": "websocket.receive", "text": '{"request": 5}'})
-    
+
     resp_msg = await send_queue.get()
     assert resp_msg["type"] == "websocket.send"
     import json
@@ -96,7 +99,7 @@ async def test_websocket_json():
     # Close
     close_msg = await send_queue.get()
     assert close_msg["type"] == "websocket.close"
-    
+
     await task
 
 
@@ -135,6 +138,6 @@ async def test_websocket_close_reason():
     assert close_msg["type"] == "websocket.close"
     assert close_msg["code"] == 1008
     assert close_msg["reason"] == "Policy Violation"
-    
+
     await task
 

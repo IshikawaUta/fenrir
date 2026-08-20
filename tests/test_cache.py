@@ -1,8 +1,9 @@
 """Tests for fenrir.cache — Multi-backend caching system."""
-import pytest
 import time
-from fenrir.cache import Cache, MemoryCache, FileCache
 
+import pytest
+
+from fenrir.cache import Cache, FileCache, MemoryCache
 
 # ═══════════════════════════════════════════════════════════════════════
 # MemoryCache Tests
@@ -159,16 +160,16 @@ class TestCacheWrapper:
     async def test_cached_decorator(self):
         cache = Cache(MemoryCache())
         call_count = 0
-        
+
         @cache.cached(ttl=60)
         async def expensive_func(x):
             nonlocal call_count
             call_count += 1
             return x * 2
-        
+
         result1 = await expensive_func(5)
         result2 = await expensive_func(5)
-        
+
         assert result1 == 10
         assert result2 == 10
         assert call_count == 1
@@ -177,42 +178,42 @@ class TestCacheWrapper:
     async def test_cached_decorator_different_args(self):
         cache = Cache(MemoryCache())
         call_count = 0
-        
+
         @cache.cached(ttl=60)
         async def expensive_func(x):
             nonlocal call_count
             call_count += 1
             return x * 2
-        
+
         await expensive_func(5)
         await expensive_func(10)
-        
+
         assert call_count == 2
 
     @pytest.mark.anyio
     async def test_invalidate_decorator(self):
         cache = Cache(MemoryCache())
         call_count = 0
-        
+
         @cache.cached(ttl=60, key_prefix="test")
         async def expensive_func(x):
             nonlocal call_count
             call_count += 1
             return x * 2
-        
+
         # First call - computes
         result1 = await expensive_func(5)
         assert result1 == 10
         assert call_count == 1
-        
+
         # Second call - cached
         result2 = await expensive_func(5)
         assert result2 == 10
         assert call_count == 1
-        
+
         # Manually delete the cache entry
         await cache.delete("test:5")
-        
+
         # Third call - recomputes
         result3 = await expensive_func(5)
         assert result3 == 10

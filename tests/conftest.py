@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import Fenrir
+
 
 @pytest.fixture
 def anyio_backend():
@@ -19,7 +21,7 @@ async def client(app):
 
 import asyncio
 import gc
-import sys
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
@@ -29,7 +31,7 @@ def pytest_sessionfinish(session, exitstatus):
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = None
-    
+
     if loop and not loop.is_closed():
         # Cancel all pending tasks
         pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
@@ -40,21 +42,21 @@ def pytest_sessionfinish(session, exitstatus):
             loop.run_until_complete(
                 asyncio.gather(*pending, return_exceptions=True)
             )
-        
+
         # Shut down the default executor before closing the loop
         # This prevents the atexit handler from hanging on t.join()
         executor = getattr(loop, '_default_executor', None)
         if executor is not None:
             executor.shutdown(wait=False)
-        
+
         # Close the loop
         if loop.is_running():
             loop.stop()
         loop.close()
-    
+
     # Force garbage collection to clean up any remaining resources
     gc.collect()
-    
+
     # Clear the event loop reference
     try:
         asyncio.set_event_loop(None)

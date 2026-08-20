@@ -9,27 +9,25 @@
 """
 import os
 import tempfile
-import pytest
-import httpx
-from pydantic import BaseModel
-from fenrir import (
-    Fenrir,
-    Annotated,
-    Query,
-    Header,
-    Body,
-    Depends,
-    BackgroundTasks,
-    StreamingResponse,
-    FileResponse,
-    PlainTextResponse,
-    WsgiToAsgi,
-    install_bottle_compat,
-    Bottle,
-    bottle,
-    APIRouter,
-)
 
+import httpx
+import pytest
+from pydantic import BaseModel
+
+from fenrir import (
+    Annotated,
+    APIRouter,
+    BackgroundTasks,
+    Fenrir,
+    FileResponse,
+    Header,
+    PlainTextResponse,
+    Query,
+    StreamingResponse,
+    WsgiToAsgi,
+    bottle,
+    install_bottle_compat,
+)
 
 # ─────────────────────────────────────────────
 # StreamingResponse
@@ -518,15 +516,16 @@ def test_send_file_as_attachment_returns_file_response(tmp_path):
 
 
 def test_send_file_filelike_object():
-    from fenrir.helpers import send_file
     import io
+
+    from fenrir.helpers import send_file
     data = io.BytesIO(b"hello world")
     resp = send_file(data)
     assert resp.status == 200
 
 
 def test_send_file_missing_raises_404():
-    from fenrir.helpers import send_file
     from fenrir.exceptions import HTTPNotFound
+    from fenrir.helpers import send_file
     with pytest.raises(HTTPNotFound):
         send_file("/nonexistent/path/file.txt")

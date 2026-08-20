@@ -1,5 +1,7 @@
 import pytest
+
 from demo_app import app
+
 
 @pytest.mark.anyio
 async def test_logo_route():

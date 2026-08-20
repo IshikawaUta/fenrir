@@ -1,5 +1,5 @@
 import pytest
-from fenrir import Fenrir, HTTPBadRequest
+
 
 @pytest.mark.anyio
 async def test_trusted_hosts(app):

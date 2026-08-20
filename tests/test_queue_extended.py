@@ -1,10 +1,16 @@
 """Tests for fenrir.queue — MemoryQueue, Queue, Worker."""
 import asyncio
-import time
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
 from fenrir.queue import (
-    Job, JobStatus, QueueBackend, MemoryQueue, Queue, Worker,
+    Job,
+    JobStatus,
+    MemoryQueue,
+    Queue,
+    QueueBackend,
+    Worker,
 )
 
 
@@ -168,6 +174,33 @@ class TestMemoryQueue:
         await mq.enqueue(j2)
         result = await mq.dequeue()
         assert result.id == j2.id
+
+    @pytest.mark.anyio
+    async def test_delayed_job_not_dequeued_before_ready(self):
+        mq = MemoryQueue()
+        job = Job(handler="test_handler", delay=0.1)
+        await mq.enqueue(job)
+        # Not ready yet — should not be dequeued
+        assert await mq.dequeue() is None
+        assert await mq.size() == 1
+        # After the delay elapses it becomes available
+        await asyncio.sleep(0.15)
+        result = await mq.dequeue()
+        assert result is not None
+        assert result.id == job.id
+
+    @pytest.mark.anyio
+    async def test_requeue_delayed_job_honors_delay(self):
+        mq = MemoryQueue()
+        job = _make_job()
+        await mq.enqueue(job)
+        assert await mq.dequeue() is not None
+        job.delay = 0.1
+        await mq.requeue(job)
+        assert await mq.dequeue() is None
+        await asyncio.sleep(0.15)
+        result = await mq.dequeue()
+        assert result is not None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -343,3 +376,141 @@ class TestWorker:
         except asyncio.TimeoutError:
             pass
         # Should not crash
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Dead-letter & Persistence Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestDeadLetter:
+    @pytest.mark.anyio
+    async def test_dead_letter_handler_called_on_permanent_failure(self):
+        q = Queue()
+        dead_letters = []
+
+        @q.handler("always_fail")
+        async def always_fail():
+            raise RuntimeError("permanent")
+
+        q._dead_letter_handler = lambda job: dead_letters.append(job.id)
+
+        await q.enqueue("always_fail", max_retries=0)
+        job = await q.process_next()
+        assert job.status == JobStatus.FAILED
+        assert dead_letters == [job.id]
+
+    @pytest.mark.anyio
+    async def test_dead_letter_async_handler(self):
+        q = Queue()
+        dead_letters = []
+
+        @q.handler("always_fail")
+        async def always_fail():
+            raise RuntimeError("permanent")
+
+        async def handler(job):
+            dead_letters.append(job.id)
+
+        q._dead_letter_handler = handler
+
+        await q.enqueue("always_fail", max_retries=0)
+        job = await q.process_next()
+        assert job.status == JobStatus.FAILED
+        assert dead_letters == [job.id]
+
+    @pytest.mark.anyio
+    async def test_dead_letter_not_called_when_retry_succeeds(self):
+        q = Queue(retry_backoff=0)
+        dead_letters = []
+        call_count = 0
+
+        @q.handler("flaky")
+        async def flaky():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient")
+            return "ok"
+
+        q._dead_letter_handler = lambda job: dead_letters.append(job.id)
+
+        await q.enqueue("flaky", max_retries=1)
+        first = await q.process_next()
+        assert first.status == JobStatus.PENDING
+        second = await q.process_next()
+        assert second.status == JobStatus.COMPLETED
+        assert dead_letters == []
+
+    @pytest.mark.anyio
+    async def test_dead_letter_handler_error_does_not_break_worker(self):
+        q = Queue()
+
+        @q.handler("always_fail")
+        async def always_fail():
+            raise RuntimeError("permanent")
+
+        def handler(job):
+            raise RuntimeError("handler bug")
+
+        q._dead_letter_handler = handler
+
+        await q.enqueue("always_fail", max_retries=0)
+        job = await q.process_next()
+        assert job.status == JobStatus.FAILED
+
+    @pytest.mark.anyio
+    async def test_dead_letter_not_called_without_handler(self):
+        q = Queue()
+
+        @q.handler("always_fail")
+        async def always_fail():
+            raise RuntimeError("permanent")
+
+        await q.enqueue("always_fail", max_retries=0)
+        job = await q.process_next()
+        assert job.status == JobStatus.FAILED
+
+
+class TestMemoryQueuePersistence:
+    @pytest.mark.anyio
+    async def test_jobs_survive_restart(self, tmp_path):
+        db_file = str(tmp_path / "queue.db")
+        q1 = MemoryQueue(sqlite_path=db_file)
+        await q1.enqueue(Job(handler="persisted", priority=2))
+        await q1.close()
+
+        q2 = MemoryQueue(sqlite_path=db_file)
+        assert await q2.size() == 1
+        restored = await q2.dequeue()
+        assert restored is not None
+        assert restored.handler == "persisted"
+        assert restored.priority == 2
+        await q2.close()
+
+    @pytest.mark.anyio
+    async def test_completed_job_not_restored(self, tmp_path):
+        db_file = str(tmp_path / "queue2.db")
+        q1 = MemoryQueue(sqlite_path=db_file)
+        job = Job(handler="done")
+        await q1.enqueue(job)
+        await q1.dequeue()
+        job.status = JobStatus.COMPLETED
+        await q1.update_job(job)
+        await q1.close()
+
+        q2 = MemoryQueue(sqlite_path=db_file)
+        assert await q2.size() == 0
+        await q2.close()
+
+    @pytest.mark.anyio
+    async def test_remove_job_deletes_from_store(self, tmp_path):
+        db_file = str(tmp_path / "queue3.db")
+        q1 = MemoryQueue(sqlite_path=db_file)
+        job = Job(handler="doomed")
+        await q1.enqueue(job)
+        await q1.remove_job(job.id)
+        await q1.close()
+
+        q2 = MemoryQueue(sqlite_path=db_file)
+        assert await q2.size() == 0
+        await q2.close()

@@ -1,6 +1,8 @@
 import pytest
-from fenrir import Fenrir, Depends
+
+from fenrir import Depends, Fenrir
 from fenrir.testing import TestClient
+
 
 def original_dependency():
     return "original"
@@ -17,7 +19,7 @@ async def test_dependency_overrides():
         return {"value": value}
 
     client = TestClient(app)
-    
+
     # Before override
     resp = await client.get("/override")
     assert resp.status_code == 200
@@ -25,14 +27,14 @@ async def test_dependency_overrides():
 
     # Apply override
     app.dependency_overrides[original_dependency] = override_dependency
-    
+
     resp = await client.get("/override")
     assert resp.status_code == 200
     assert resp.json() == {"value": "overridden"}
 
     # Clear override
     app.dependency_overrides.clear()
-    
+
     resp = await client.get("/override")
     assert resp.status_code == 200
     assert resp.json() == {"value": "original"}

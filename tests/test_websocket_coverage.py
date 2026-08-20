@@ -1,8 +1,10 @@
 """Tests for fenrir.websocket — WebSocket class and exceptions."""
 import asyncio
+
 import pytest
-from fenrir.websocket import WebSocket, WebSocketDisconnect, WebSocketTimeout
+
 from fenrir.json import json_dumps
+from fenrir.websocket import WebSocket, WebSocketDisconnect, WebSocketTimeout
 
 
 def _make_ws(timeout=None):
@@ -148,13 +150,13 @@ class TestWebSocketReceive:
         async def receive():
             await asyncio.sleep(0.02)  # Wait 20ms
             return {"type": "websocket.receive", "text": "late"}
-        
+
         async def send(msg):
             pass
-            
+
         scope = {"type": "websocket", "path": "/ws"}
         ws = WebSocket(scope, receive, send, timeout=0.01)  # 10ms timeout
-        
+
         with pytest.raises(WebSocketTimeout):
             await ws.receive()
 

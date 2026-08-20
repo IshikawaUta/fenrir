@@ -1,7 +1,8 @@
 """Tests for fenrir.openapi — OpenAPI schema generation."""
-import pytest
 from enum import Enum
+
 from pydantic import BaseModel
+
 from fenrir.openapi import _fix_refs
 
 

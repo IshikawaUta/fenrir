@@ -1,6 +1,8 @@
 import asyncio
-import pytest
+
 import httpx
+import pytest
+
 from fenrir import Fenrir, install_sanic_compat, sanic
 
 

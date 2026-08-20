@@ -1,9 +1,9 @@
 """Tests for fenrir.features module."""
 import os
-import pytest
 from unittest.mock import patch
 
-from fenrir import Fenrir
+import pytest
+
 from fenrir.features import init_fenrir_monitoring
 
 
@@ -42,3 +42,15 @@ class TestInitFenrirMonitoring:
         }):
             init_fenrir_monitoring(app)
         assert app.config["MONITORING_USER"] == "testuser"
+
+    async def test_dotenv_missing(self, app):
+        with patch.dict("sys.modules", {"dotenv": None}):
+            with patch.dict(os.environ, {"MONITORING_ENABLED": "false"}):
+                init_fenrir_monitoring(app)
+        routes = [r.path_pattern for r in app.router.routes]
+        assert not any("/monitoring" in r for r in routes)
+
+    async def test_enabled_false_kwarg(self, app):
+        with patch.dict(os.environ, {"MONITORING_ENABLED": "false"}):
+            init_fenrir_monitoring(app, enabled=False)
+        assert app.config.get("MONITORING_ENABLED") is False

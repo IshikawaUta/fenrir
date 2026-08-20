@@ -1,7 +1,18 @@
-import os
 import asyncio
+import os
+
 import pytest
-from fenrir import Fenrir, HTTPNotFound, HTTPForbidden, HTTPBadRequest, HTTPUnauthorized, HTTPConflict, HTTPUnprocessableEntity, HTTPInternalServerError
+
+from fenrir import (
+    Fenrir,
+    HTTPBadRequest,
+    HTTPConflict,
+    HTTPForbidden,
+    HTTPInternalServerError,
+    HTTPNotFound,
+    HTTPUnauthorized,
+    HTTPUnprocessableEntity,
+)
 from fenrir.response import JSONResponse
 from fenrir.testing import FenrirTestClient
 
@@ -378,6 +389,7 @@ class TestDevModeParameter:
 
         os.environ["FENRIR_DEV_MODE"] = "1"
         import importlib
+
         import fenrir._app_core as core
         importlib.reload(core)
         app2 = core.FenrirCoreMixin.__new__(core.FenrirCoreMixin)
@@ -393,6 +405,7 @@ class TestDevModeParameter:
     def test_explicit_false_overrides_env_var(self):
         os.environ["FENRIR_DEV_MODE"] = "1"
         import importlib
+
         import fenrir._app_core as core
         importlib.reload(core)
         app = core.FenrirCoreMixin.__new__(core.FenrirCoreMixin)

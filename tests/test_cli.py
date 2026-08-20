@@ -1,8 +1,10 @@
-import pytest
-from unittest import mock
-import sys
 import os
+from unittest import mock
+
+import pytest
+
 from fenrir.cli import main
+
 
 # Mock app target for testing
 class MockApp:
@@ -10,11 +12,11 @@ class MockApp:
     version = "0.0.1"
     openapi_url = "/openapi.json"
     _route_blueprints = {}
-    
+
     class Router:
         routes = []
     router = Router()
-    
+
     def run(self, **kwargs):
         pass
 
@@ -54,7 +56,7 @@ def test_cli_routes(mock_load_app, capsys):
         def is_falcon_resource(self): return False
 
     MockApp.router.routes = [MockRoute()]
-    
+
     with mock.patch("sys.argv", ["fenrir", "routes", "mock_module:app"]):
         main()
     captured = capsys.readouterr()
@@ -120,9 +122,9 @@ def test_cli_bench(mock_load_app):
             # Setup mock client to handle request
             client_instance = mock_client.return_value.__aenter__.return_value
             client_instance.request = mock.AsyncMock()
-            
+
             main()
-            
+
             # Should call client.request at least 50 (warmup) + 20 (trials) times
             assert client_instance.request.call_count >= 70
 
@@ -132,7 +134,7 @@ def test_cli_new(tmp_path):
     target_dir = tmp_path / "my_new_app"
     with mock.patch("sys.argv", ["fenrir", "new", str(target_dir)]):
         main()
-    
+
     assert os.path.exists(target_dir)
     assert os.path.exists(target_dir / "app.py")
     assert os.path.exists(target_dir / "static" / "style.css")

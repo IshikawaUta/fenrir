@@ -1,6 +1,14 @@
 import pytest
+
 from fenrir import render_template
-from fenrir.signals import request_started, request_finished, got_request_exception, template_rendered
+from fenrir.signals import (
+    Signal,
+    got_request_exception,
+    request_finished,
+    request_started,
+    template_rendered,
+)
+
 
 @pytest.mark.anyio
 async def test_signals_firing(app, tmp_path):
@@ -28,7 +36,7 @@ async def test_signals_firing(app, tmp_path):
         app.renderer.env.loader.searchpath.append(str(tmp_path))
         template_file = tmp_path / "hello.html"
         template_file.write_text("Hello {{ name }}")
-        
+
         return render_template("hello.html", name="utah")
 
     @app.get("/error")
@@ -51,3 +59,36 @@ async def test_signals_firing(app, tmp_path):
     assert resp.status_code == 500
     assert "started" in events
     assert "error" in events
+
+
+def test_signals_send_async_receiver_without_loop():
+    s = Signal("x")
+
+    @s.connect
+    async def receiver(sender, **extra):
+        pass
+
+    assert s.send("sender") == []
+
+
+@pytest.mark.anyio
+async def test_signals_async_cache_eviction(monkeypatch):
+    import asyncio
+
+    import fenrir.signals as sig
+
+    monkeypatch.setattr(sig, "_RECEIVER_CACHE_MAX", 2)
+    sig._receiver_is_async_cache.clear()
+    s = Signal("x")
+
+    def make():
+        async def receiver(sender, **extra):
+            pass
+        return receiver
+
+    for r in (make(), make(), make()):
+        s.connect(r)
+        s.send("sender")
+        await asyncio.sleep(0)
+
+    assert len(sig._receiver_is_async_cache) == 2

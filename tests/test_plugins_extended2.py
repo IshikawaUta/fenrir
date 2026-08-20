@@ -1,11 +1,15 @@
 """Tests for fenrir.plugins — extended coverage."""
-import time
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
 from fenrir.plugins import (
-    Plugin, PluginRegistry, PluginHealth,
-    PluginVersionError, PluginDependencyError, PluginConfigError,
-    plugin_hook, setup_plugins,
+    Plugin,
+    PluginConfigError,
+    PluginRegistry,
+    PluginVersionError,
+    plugin_hook,
+    setup_plugins,
 )
 
 

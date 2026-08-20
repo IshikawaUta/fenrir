@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import redirect
+
 
 @pytest.mark.anyio
 async def test_relative_redirect(app):

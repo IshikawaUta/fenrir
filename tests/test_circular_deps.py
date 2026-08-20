@@ -1,6 +1,8 @@
-import pytest
 import httpx
-from fenrir import Fenrir, Depends
+import pytest
+
+from fenrir import Depends, Fenrir
+
 
 @pytest.mark.anyio
 async def test_circular_dependency():
@@ -28,9 +30,9 @@ async def test_circular_dependency():
         from fenrir.dependencies import resolve_parameters
         from fenrir.request import Request
         from fenrir.response import Response
-        
+
         req = Request({"type": "http", "method": "GET", "path": "/circular"})
         resp = Response()
-        
+
         with pytest.raises(RuntimeError, match="Circular dependency detected"):
             await resolve_parameters(get_circular, {}, req, resp)

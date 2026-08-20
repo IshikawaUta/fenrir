@@ -1,11 +1,10 @@
 """Tests for GZipMiddleware streaming fix."""
 import gzip
-import zlib
 
-import pytest
 import httpx
+import pytest
 
-from fenrir import Fenrir, Response, StreamingResponse, FileResponse
+from fenrir import Fenrir, FileResponse, Response, StreamingResponse
 from fenrir.middleware import GZipMiddleware
 
 

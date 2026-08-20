@@ -1,8 +1,9 @@
 """Tests for fenrir.cache — RedisCache with fakeredis."""
 import asyncio
+
 import pytest
-from unittest.mock import patch
-from fenrir.cache import RedisCache, Cache
+
+from fenrir.cache import Cache, RedisCache
 
 
 @pytest.fixture
@@ -72,6 +73,12 @@ class TestRedisCache:
     @pytest.mark.anyio
     async def test_set_many(self, redis_cache):
         await redis_cache.set_many({"a": "1", "b": "2"})
+        assert await redis_cache.get("a") == "1"
+        assert await redis_cache.get("b") == "2"
+
+    @pytest.mark.anyio
+    async def test_set_many_with_ttl(self, redis_cache):
+        await redis_cache.set_many({"a": "1", "b": "2"}, ttl=60)
         assert await redis_cache.get("a") == "1"
         assert await redis_cache.get("b") == "2"
 

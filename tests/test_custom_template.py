@@ -1,8 +1,11 @@
-import pytest
-import httpx
 from typing import Any
+
+import httpx
+import pytest
+
 from fenrir import Fenrir
 from fenrir.templating import BaseTemplateRenderer, render_template
+
 
 class CustomRenderer(BaseTemplateRenderer):
     def render(self, template_name: str, **context: Any) -> str:

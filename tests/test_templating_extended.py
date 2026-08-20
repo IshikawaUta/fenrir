@@ -1,11 +1,12 @@
 """Tests for fenrir.templating module."""
 import os
 import tempfile
-import pytest
 from unittest.mock import MagicMock, patch
-from fenrir.templating import BaseTemplateRenderer, Jinja2Renderer, render_template
-from fenrir.exceptions import HTTPInternalServerError
 
+import pytest
+
+from fenrir.exceptions import HTTPInternalServerError
+from fenrir.templating import BaseTemplateRenderer, Jinja2Renderer, render_template
 
 # ═══════════════════════════════════════════════════════════════════════
 # BaseTemplateRenderer Tests
@@ -79,7 +80,7 @@ class TestRenderTemplate:
         mock_app = MagicMock()
         mock_app.renderer = mock_renderer
 
-        with patch("fenrir.app._active_app", mock_app):
+        with patch("fenrir.app._get_active_app", return_value=mock_app):
             result = render_template("test.html", name="test")
 
         assert result == "<html>rendered</html>"
@@ -91,7 +92,7 @@ class TestRenderTemplate:
         mock_app = MagicMock()
         mock_app.renderer = mock_renderer
 
-        with patch("fenrir.app._active_app", mock_app):
+        with patch("fenrir.app._get_active_app", return_value=mock_app):
             with pytest.raises(HTTPInternalServerError, match="Template rendering failed"):
                 render_template("bad.html")
 
@@ -102,7 +103,7 @@ class TestRenderTemplate:
             with open(os.path.join(tmpl_dir, "fallback.html"), "w") as f:
                 f.write("Fallback {{ value }}")
 
-            with patch("fenrir.app._active_app", None):
+            with patch("fenrir.app._get_active_app", return_value=None):
                 os.chdir(tmpdir)
                 try:
                     result = render_template("fallback.html", value="test")
@@ -111,13 +112,13 @@ class TestRenderTemplate:
                     os.chdir("/")
 
     def test_render_fallback_error(self):
-        with patch("fenrir.app._active_app", None):
+        with patch("fenrir.app._get_active_app", return_value=None):
             with pytest.raises(HTTPInternalServerError, match="Template rendering failed"):
                 render_template("nonexistent.html")
 
     def test_render_with_no_renderer(self):
         mock_app = MagicMock(spec=[])  # no renderer attribute
-        with patch("fenrir.app._active_app", mock_app):
+        with patch("fenrir.app._get_active_app", return_value=mock_app):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpl_dir = os.path.join(tmpdir, "templates")
                 os.makedirs(tmpl_dir)

@@ -1,15 +1,16 @@
 """Tests for fenrir.exceptions — HTTP exception hierarchy."""
 import pytest
+
 from fenrir.exceptions import (
-    HTTPException,
     HTTPBadRequest,
-    HTTPUnauthorized,
-    HTTPForbidden,
-    HTTPNotFound,
-    HTTPMethodNotAllowed,
     HTTPConflict,
-    HTTPUnprocessableEntity,
+    HTTPException,
+    HTTPForbidden,
     HTTPInternalServerError,
+    HTTPMethodNotAllowed,
+    HTTPNotFound,
+    HTTPUnauthorized,
+    HTTPUnprocessableEntity,
 )
 
 

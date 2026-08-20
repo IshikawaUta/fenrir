@@ -1,12 +1,19 @@
 """Tests for fenrir.signals module."""
 import asyncio
-import pytest
-from fenrir.signals import (
-    Namespace, Signal, _handle_signal_error,
-    request_started, request_finished, got_request_exception, template_rendered,
-    signal_bus, signal,
-)
 
+import pytest
+
+from fenrir.signals import (
+    Namespace,
+    Signal,
+    _handle_signal_error,
+    got_request_exception,
+    request_finished,
+    request_started,
+    signal,
+    signal_bus,
+    template_rendered,
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Namespace Tests

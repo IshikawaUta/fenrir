@@ -1,9 +1,9 @@
 """Tests for fenrir.upload module."""
-import asyncio
 import io
-import pytest
-from fenrir.upload import UploadFile
 
+import pytest
+
+from fenrir.upload import UploadFile
 
 # ═══════════════════════════════════════════════════════════════════════
 # UploadFile with Sync File Object

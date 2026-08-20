@@ -1,8 +1,7 @@
 """Tests for fenrir.graphql module."""
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-import inspect
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ═══════════════════════════════════════════════════════════════════════
 # GraphQLRouter Tests
@@ -163,6 +162,81 @@ class TestGraphQLHandleRequest:
         result = await router.handle_request(req)
         assert result.status == 500
 
+    @pytest.mark.anyio
+    async def test_json_property_raises(self):
+        from fenrir.graphql import GraphQLRouter
+
+        class _BadReq:
+            @property
+            def json(self):
+                raise ValueError("bad json")
+
+        router = GraphQLRouter(MagicMock())
+        result = await router.handle_request(_BadReq())
+        assert result.status == 400
+
+    @pytest.mark.anyio
+    async def test_introspection_disabled(self):
+        from fenrir.graphql import GraphQLRouter
+        router = GraphQLRouter(MagicMock(), introspection=False)
+        req = MagicMock(json={"query": "{ __schema { types { name } } }"})
+        result = await router.handle_request(req)
+        assert result.status == 403
+
+    @pytest.mark.anyio
+    async def test_introspection_disabled_but_normal_query(self):
+        from fenrir.graphql import GraphQLRouter
+        schema = AsyncMock()
+        schema.execute = AsyncMock(return_value=MagicMock(data={}, errors=None))
+        router = GraphQLRouter(schema, introspection=False)
+        req = MagicMock(json={"query": "{ a }"})
+        result = await router.handle_request(req)
+        assert result.status == 200
+
+    @pytest.mark.anyio
+    async def test_max_depth_exceeded(self):
+        from fenrir.graphql import GraphQLRouter
+        router = GraphQLRouter(MagicMock(), max_depth=1)
+        req = MagicMock(json={"query": "{ a { b } }"})
+        result = await router.handle_request(req)
+        assert result.status == 400
+
+    @pytest.mark.anyio
+    async def test_context_factory_non_dict(self):
+        from fenrir.graphql import GraphQLRouter
+        schema = AsyncMock()
+        schema.execute = AsyncMock(return_value=MagicMock(data={}, errors=None))
+        router = GraphQLRouter(schema, context_factory=lambda req: "user")
+        req = MagicMock(json={"query": "{ x }"})
+        result = await router.handle_request(req)
+        assert result.status == 200
+
+    @pytest.mark.anyio
+    async def test_context_factory_not_callable(self):
+        from fenrir.graphql import GraphQLRouter
+        schema = AsyncMock()
+        schema.execute = AsyncMock(return_value=MagicMock(data={}, errors=None))
+        router = GraphQLRouter(schema, context_factory=object())
+        req = MagicMock(json={"query": "{ x }"})
+        result = await router.handle_request(req)
+        assert result.status == 200
+
+    @pytest.mark.anyio
+    async def test_mount_app_integration(self):
+        from fenrir import Fenrir
+        from fenrir.graphql import GraphQLRouter
+        app = Fenrir()
+        schema = AsyncMock()
+        schema.execute = AsyncMock(return_value=MagicMock(data={"ok": True}, errors=None))
+        router = GraphQLRouter(schema, path="/gql", graphiql=True)
+        router.mount(app)
+        client = app.test_client()
+        resp = await client.post("/gql", json={"query": "{ ok }"})
+        assert resp.status_code == 200
+        get_resp = await client.get("/gql")
+        assert get_resp.status_code == 200
+        assert "GraphiQL" in get_resp.text
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # GraphiQL HTML Tests
@@ -177,6 +251,17 @@ class TestGraphiQLHTML:
         assert "GraphiQL" in html
         assert "/graphql" in html
         assert "<!DOCTYPE html>" in html
+
+    def test_query_depth_escape(self):
+        from fenrir.graphql import GraphQLRouter
+        depth = GraphQLRouter._query_depth('{ f(arg: "x\\"y") }')
+        assert depth == 1
+
+    def test_query_depth_flat_repeat(self):
+        from fenrir.graphql import GraphQLRouter
+        assert GraphQLRouter._query_depth("{}{}") == 1
+        assert GraphQLRouter._query_depth("{ a b }") == 1
+        assert GraphQLRouter._query_depth("{ a { b } }") == 2
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -10,19 +10,18 @@ Tests for new features added to Fenrir v4.1.2:
 - Optimal GZip level
 - Distributed rate limiting
 """
-import asyncio
-import gzip
 import time
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from fenrir import Fenrir, Depends, WebSocket
-from fenrir.routing import RouteTrie, Router, Route
-from fenrir.middleware import GZipMiddleware, RateLimitMiddleware
-from fenrir.security import WebSocketTokenAuth
-from fenrir.pool import ConnectionPool, DatabasePool
-from fenrir.http2 import HTTP2Push
-from fenrir.request import Request
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from fenrir import Fenrir
+from fenrir.http2 import HTTP2Push
+from fenrir.middleware import GZipMiddleware, RateLimitMiddleware
+from fenrir.pool import ConnectionPool, DatabasePool
+from fenrir.request import Request
+from fenrir.routing import Route, Router, RouteTrie
+from fenrir.security import WebSocketTokenAuth
 
 # ============================================================================
 # Trie-based routing tests

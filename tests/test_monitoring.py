@@ -1,31 +1,44 @@
 """Tests for fenrir.monitoring module."""
-import os
 import json
-import pytest
+import os
+import time
 from unittest.mock import patch
+
+import pytest
 
 from fenrir import Fenrir
 from fenrir.monitoring.core import (
-    _hash_password,
-    _verify_password,
     _generate_token,
-    _validate_token,
-    record_request,
-    check_site_health,
-    get_traffic_stats,
-    add_alert,
-    get_alerts,
-    _monitoring_data,
-    init_monitoring,
-    _save_data,
-    _load_data,
-    get_uptime_stats,
-    get_response_time_history,
-    get_hourly_traffic,
-    get_summary,
     _get_data_dir,
+    _hash_password,
+    _is_login_locked,
+    _load_data,
+    _monitoring_data,
+    _record_login_failure,
+    _reset_login_attempts,
+    _save_data,
+    _validate_token,
+    _verify_password,
+    add_alert,
+    check_site_health,
+    get_alerts,
+    get_hourly_traffic,
+    get_response_time_history,
+    get_summary,
+    get_traffic_stats,
+    get_uptime_stats,
+    init_monitoring,
+    record_request,
 )
-from fenrir.monitoring.routes import register_monitoring_routes, _parse_form
+from fenrir.monitoring.routes import _parse_form
+
+
+@pytest.fixture(autouse=True)
+def reset_login_attempts():
+    """Clear login-failure tracking so tests don't trip each other's lockout."""
+    from fenrir.monitoring.core import _login_attempts
+    yield
+    _login_attempts.clear()
 
 
 MONITORING_ENV = {
@@ -115,6 +128,53 @@ class TestTokenValidation:
 
     def test_none_token(self):
         assert _validate_token(None, "admin", "secret") is False
+
+    def test_token_cannot_be_forged_without_secret(self):
+        """An unkeyed SHA-256 digest (the old scheme) must not validate."""
+        import hashlib as _hashlib
+        import time as _time
+        expires_at = int(_time.time()) + 3600
+        forged_hash = _hashlib.sha256(f"admin:{expires_at}".encode()).hexdigest()
+        assert _validate_token(f"{forged_hash}:{expires_at}", "admin", "secret") is False
+
+    def test_token_tampered_signature_rejected(self):
+        token = _generate_token("admin", "secret")
+        token_hash, expires_at = token.rsplit(":", 1)
+        tampered = "f" * 64 + f":{expires_at}"
+        assert _validate_token(tampered, "admin", "secret") is False
+
+
+class TestLoginRateLimit:
+    def test_records_failures_and_locks(self):
+        ip = "203.0.113.10"
+        assert _is_login_locked(ip) is False
+        for _ in range(5):
+            _record_login_failure(ip)
+        assert _is_login_locked(ip) is True
+
+    def test_lockout_expires(self):
+        from fenrir.monitoring import core
+        ip = "203.0.113.11"
+        for _ in range(5):
+            _record_login_failure(ip)
+        assert _is_login_locked(ip) is True
+        with patch("time.time", return_value=time.time() + core.LOGIN_LOCKOUT_WINDOW + 1):
+            assert _is_login_locked(ip) is False
+
+    def test_reset_clears_failures(self):
+        ip = "203.0.113.12"
+        for _ in range(3):
+            _record_login_failure(ip)
+        _reset_login_attempts(ip)
+        assert _is_login_locked(ip) is False
+
+    def test_reset_after_successful_login(self):
+        ip = "203.0.113.13"
+        for _ in range(5):
+            _record_login_failure(ip)
+        assert _is_login_locked(ip) is True
+        _reset_login_attempts(ip)
+        assert _is_login_locked(ip) is False
 
 
 class TestRecordRequest:
@@ -447,7 +507,7 @@ class TestMonitoringRoutes:
         for cookie in resp.headers.get_list("set-cookie"):
             if "monitoring_csrf=" in cookie:
                 csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
-        
+
         client.client.cookies.set("monitoring_csrf", csrf_token)
         resp = await client.post(
             "/monitoring/login",
@@ -572,7 +632,7 @@ class TestMonitoringRoutes:
         for cookie in resp.headers.get_list("set-cookie"):
             if "monitoring_csrf=" in cookie:
                 csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
-        
+
         client.client.cookies.set("monitoring_csrf", csrf_token)
         resp = await client.post(
             "/monitoring/login",
@@ -700,9 +760,42 @@ class TestMonitoringRoutes:
         client.client.cookies.set("monitoring_csrf", csrf_token)
         resp = await client.post(
             "/monitoring/login",
-            content=f"username=admin&password=testpass&csrf_token=wrong_token".encode(),
+            content=b"username=admin&password=testpass&csrf_token=wrong_token",
         )
         assert resp.status_code == 403
+
+    async def test_monitoring_login_lockout_after_repeated_failures(self, app):
+        from fenrir.monitoring.core import init_monitoring
+        with patch.dict(os.environ, MONITORING_ENV):
+            init_monitoring(app)
+
+        client = app.test_client()
+        for _ in range(5):
+            resp = await client.get("/monitoring/login")
+            csrf_token = ""
+            for cookie in resp.headers.get_list("set-cookie"):
+                if "monitoring_csrf=" in cookie:
+                    csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+            client.client.cookies.set("monitoring_csrf", csrf_token)
+            resp = await client.post(
+                "/monitoring/login",
+                content=f"username=admin&password=wrong&csrf_token={csrf_token}".encode(),
+            )
+            assert resp.status_code == 401
+
+        # The sixth attempt within the window is rejected with 429.
+        resp = await client.get("/monitoring/login")
+        csrf_token = ""
+        for cookie in resp.headers.get_list("set-cookie"):
+            if "monitoring_csrf=" in cookie:
+                csrf_token = cookie.split("monitoring_csrf=")[1].split(";")[0]
+        client.client.cookies.set("monitoring_csrf", csrf_token)
+        resp = await client.post(
+            "/monitoring/login",
+            content=f"username=admin&password=wrong&csrf_token={csrf_token}".encode(),
+        )
+        assert resp.status_code == 429
+        assert "Too many failed attempts" in resp.text
 
     async def test_monitoring_dashboard_renders_with_auth(self, app):
         from fenrir.monitoring.core import init_monitoring
@@ -758,7 +851,7 @@ class TestMonitoringRoutes:
             if "monitoring_csrf=" in cookie:
                 csrf_cookie_found = True
                 assert "SameSite=Lax" in cookie
-                assert "Max-Age=300" in cookie
+                assert "Max-Age=86400" in cookie
         assert csrf_cookie_found
 
     async def test_monitoring_api_check_unauthenticated(self, app):

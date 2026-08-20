@@ -1,23 +1,23 @@
 """Tests for fenrir.performance module."""
-import asyncio
 import time
+
 import pytest
+
 from fenrir.performance import (
-    ObjectPool,
-    ResponseCache,
     FastPathRouter,
-    OptimizedPipeline,
     LazyImportCache,
+    ObjectPool,
+    OptimizedPipeline,
     PerformanceMonitor,
+    ResponseCache,
+    _dict_pool,
+    _lazy_cache,
+    _list_pool,
     fast_json_dumps,
     fast_json_loads,
-    optimize_app,
-    _dict_pool,
-    _list_pool,
-    _lazy_cache,
     monitor,
+    optimize_app,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # ObjectPool
@@ -184,6 +184,15 @@ class TestResponseCache:
         cache.set("a", 2)  # Update
         assert cache.get("a") == 2
 
+    def test_eviction_prefers_expired(self):
+        cache = ResponseCache(max_size=2)
+        cache.set("a", 1, ttl=-1)
+        cache.set("b", 2)
+        cache.set("c", 3)  # overflow -> expired "a" popped first
+        assert cache.get("a") is None
+        assert cache.get("b") == 2
+        assert cache.get("c") == 3
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # FastPathRouter
@@ -267,6 +276,19 @@ class TestOptimizedPipeline:
         pipeline.add(DummyMiddleware)
         c2 = pipeline.compile()
         assert c1 is not c2
+
+    def test_compile_middleware_error(self):
+        async def app(scope, receive, send):
+            pass
+
+        class BadMiddleware:
+            def __init__(self, app, **kwargs):
+                raise RuntimeError("boom")
+
+        pipeline = OptimizedPipeline(app)
+        pipeline.add(BadMiddleware)
+        with pytest.raises(RuntimeError):
+            pipeline.compile()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -354,6 +376,13 @@ class TestPerformanceMonitor:
         stats = mon.get_stats("missing")
         assert stats["count"] == 0
 
+    def test_get_stats_empty_latencies(self):
+        mon = PerformanceMonitor()
+        mon._latencies["x"] = []
+        stats = mon.get_stats("x")
+        assert stats["count"] == 0
+        assert stats["min"] == 0
+
     def test_get_all_stats(self):
         mon = PerformanceMonitor()
         mon.start_timer("a")
@@ -404,3 +433,120 @@ class TestOptimizeApp:
         app = Fenrir()
         optimize_app(app, response_ttl=120)
         assert app._response_cache._default_ttl == 120
+
+    @pytest.mark.anyio
+    async def test_cache_middlewares(self):
+        from fenrir import Fenrir
+        app = Fenrir()
+        optimize_app(app)
+        resp_mw = app.middlewares["response"][-1]
+        req_mw = app.middlewares["request"][-1]
+
+        class Req:
+            method = "GET"
+            path = "/x"
+            query_string = b"q=1"
+
+        class Resp:
+            status = 200
+            headers = {"content-type": "text/plain"}
+            body = b"hello"
+
+        await resp_mw(Req(), Resp())
+        cached = await req_mw(Req())
+        assert cached is not None
+        assert cached.body == b"hello"
+        assert cached.status == 200
+        assert cached.headers["content-type"] == "text/plain"
+
+    @pytest.mark.anyio
+    async def test_cache_middleware_no_query_attr(self):
+        from fenrir import Fenrir
+        app = Fenrir()
+        optimize_app(app)
+        resp_mw = app.middlewares["response"][-1]
+        req_mw = app.middlewares["request"][-1]
+
+        class Req:
+            method = "GET"
+            path = "/y"
+
+        class Resp:
+            status = 200
+            headers = {}
+            body = b"ok"
+
+        await resp_mw(Req(), Resp())
+        cached = await req_mw(Req())
+        assert cached is not None
+        assert cached.body == b"ok"
+
+    @pytest.mark.anyio
+    async def test_cache_middleware_body_raise(self):
+        from fenrir import Fenrir
+        app = Fenrir()
+        optimize_app(app)
+        resp_mw = app.middlewares["response"][-1]
+
+        class Req:
+            method = "GET"
+            path = "/z"
+            query_string = b""
+
+        class Resp:
+            status = 200
+            headers = {}
+
+            @property
+            def body(self):
+                raise RuntimeError("no body")
+
+        await resp_mw(Req(), Resp())  # should swallow exception
+
+    @pytest.mark.anyio
+    async def test_cache_middleware_miss(self):
+        from fenrir import Fenrir
+        app = Fenrir()
+        optimize_app(app)
+        req_mw = app.middlewares["request"][-1]
+
+        class Req:
+            method = "GET"
+            path = "/miss"
+            query_string = b""
+
+        assert await req_mw(Req()) is None
+
+    @pytest.mark.anyio
+    async def test_cache_response_non_get(self):
+        from fenrir import Fenrir
+        app = Fenrir()
+        optimize_app(app)
+        resp_mw = app.middlewares["response"][-1]
+        req_mw = app.middlewares["request"][-1]
+
+        class Req:
+            method = "POST"
+            path = "/x"
+
+        class Resp:
+            status = 200
+            headers = {}
+            body = b"ok"
+
+        await resp_mw(Req(), Resp())
+        assert await req_mw(Req()) is None
+
+    def test_optimize_precompile_log(self, caplog):
+        class FakeApp:
+            _asgi_middlewares = [object()]
+
+            def middleware(self, mtype):
+                def deco(f):
+                    return f
+
+                return deco
+
+        with caplog.at_level("INFO", logger="fenrir.performance"):
+            optimize_app(FakeApp())
+        assert "Pre-compiling" in caplog.text

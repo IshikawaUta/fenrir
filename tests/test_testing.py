@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.anyio
 async def test_client_requests(app):
     @app.get("/headers")

@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import session
+
 
 @pytest.mark.anyio
 async def test_session_cookie_persistence(app):
@@ -15,7 +17,7 @@ async def test_session_cookie_persistence(app):
         return f"Hello {session.get('user')}"
 
     client = app.test_client()
-    
+
     resp_set = await client.get("/set")
     assert resp_set.status_code == 200
     assert "session" in resp_set.cookies

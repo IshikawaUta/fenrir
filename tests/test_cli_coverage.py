@@ -1,11 +1,16 @@
 """Tests for fenrir.cli — CLI subcommands coverage."""
 import os
-import sys
 import tempfile
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
+
 from fenrir.cli import (
-    print_banner, format_col, load_app, _update_env_var, main,
+    _update_env_var,
+    format_col,
+    load_app,
+    main,
+    print_banner,
 )
 
 
@@ -123,7 +128,7 @@ class TestMain:
                 })()
             })()
             mock_load_app.return_value = mock_app
-            
+
             from fenrir.cli import cmd_routes
             # Mock sys.argv for cmd_routes
             with patch('sys.argv', ["fenrir", "routes", "mock:app"]):

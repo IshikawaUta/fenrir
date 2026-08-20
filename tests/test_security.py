@@ -1,6 +1,18 @@
 import pytest
-from fenrir import Fenrir, Depends, APIKeyHeader, APIKeyCookie, APIKeyQuery, HTTPBasic, HTTPBearer, HTTPDigest, OAuth2PasswordBearer, OpenIDConnect
+
+from fenrir import (
+    APIKeyCookie,
+    APIKeyHeader,
+    APIKeyQuery,
+    Depends,
+    Fenrir,
+    HTTPBasic,
+    HTTPBearer,
+    OAuth2PasswordBearer,
+    SecurityHeadersMiddleware,
+)
 from fenrir.testing import TestClient
+
 
 @pytest.mark.anyio
 async def test_api_key_header():
@@ -12,7 +24,7 @@ async def test_api_key_header():
         return {"key": key}
 
     client = TestClient(app)
-    
+
     # Success
     resp = await client.get("/header", headers={"X-API-Key": "mysecret"})
     assert resp.status_code == 200
@@ -34,7 +46,7 @@ async def test_api_key_cookie():
         return {"key": key}
 
     client = TestClient(app)
-    
+
     # Success
     client.client.cookies.update({"session_key": "cookieval"})
     resp = await client.get("/cookie")
@@ -57,7 +69,7 @@ async def test_api_key_query():
         return {"key": key}
 
     client = TestClient(app)
-    
+
     # Success
     resp = await client.get("/query?api_key=queryval")
     assert resp.status_code == 200
@@ -126,3 +138,107 @@ async def test_oauth2_password():
     resp = await client.get("/oauth2", headers={"Authorization": "Bearer abc"})
     assert resp.status_code == 200
     assert resp.json() == {"token": "abc"}
+
+
+@pytest.mark.anyio
+async def test_security_headers_middleware():
+    app = Fenrir()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/")
+    async def index():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = await client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+    assert resp.headers["permissions-policy"] == "geolocation=(), microphone=(), camera=()"
+    assert resp.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+@pytest.mark.anyio
+async def test_security_headers_never_overwrite_existing():
+    app = Fenrir()
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    @app.get("/")
+    async def index():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = await client.get("/", headers={"X-Frame-Options": "SAMEORIGIN"})
+    # Request header must not clobber the middleware's DENY default, and an
+    # existing app-set response header must be preserved.
+    assert resp.headers["x-frame-options"] == "DENY"
+
+
+@pytest.mark.anyio
+async def test_security_headers_csp():
+    app = Fenrir()
+    app.add_middleware(SecurityHeadersMiddleware, csp="default-src 'self'")
+
+    @app.get("/")
+    async def index():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = await client.get("/")
+    assert resp.headers["content-security-policy"] == "default-src 'self'"
+
+
+@pytest.mark.anyio
+async def test_docs_disabled_in_production_by_default():
+    app = Fenrir()
+    assert app.openapi_url is None
+    assert app.docs_url is None
+    assert app.redoc_url is None
+
+    client = TestClient(app)
+    resp = await client.get("/openapi.json")
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_docs_enabled_in_dev_mode_and_via_flag():
+    assert Fenrir(dev_mode=True).docs_url == "/docs"
+    assert Fenrir(dev_mode=True).openapi_url == "/openapi.json"
+    assert Fenrir(docs_enabled=True).docs_url == "/docs"
+
+    client = TestClient(Fenrir(docs_enabled=True))
+    resp = await client.get("/openapi.json")
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_max_content_length_config():
+    app = Fenrir()
+    app.config["MAX_CONTENT_LENGTH"] = 10
+
+    @app.post("/")
+    async def echo():
+        return {"ok": True}
+
+    client = TestClient(app)
+    big = await client.post("/", json={"data": "this is definitely longer than ten bytes"})
+    assert big.status_code == 413
+    small = await client.post("/", json={"ok": 1})
+    assert small.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_rate_limit_config():
+    app = Fenrir()
+    app.config["RATE_LIMIT_MAX_REQUESTS"] = 2
+
+    @app.get("/")
+    async def index():
+        return {"ok": True}
+
+    client = TestClient(app)
+    assert (await client.get("/")).status_code == 200
+    assert (await client.get("/")).status_code == 200
+    assert (await client.get("/")).status_code == 429

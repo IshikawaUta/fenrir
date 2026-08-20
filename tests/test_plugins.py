@@ -1,10 +1,11 @@
 """Tests for fenrir.plugins — Production-ready plugin system."""
 import pytest
-from fenrir import Plugin, PluginRegistry, PluginHealth
+
+from fenrir import Plugin, PluginRegistry
 from fenrir.plugins import (
-    PluginError,
-    PluginDependencyError,
     PluginConfigError,
+    PluginDependencyError,
+    PluginError,
     PluginVersionError,
     setup_plugins,
 )
@@ -237,7 +238,7 @@ class TestDependencies:
         registry = PluginRegistry(app)
         registry.register(SimplePlugin)
         registry.register(DependentPlugin)
-        
+
         # Enable dependent (should auto-enable simple)
         result = registry.enable("dependent")
         assert result is True
@@ -249,7 +250,7 @@ class TestDependencies:
         registry = PluginRegistry(app)
         registry.register(SimplePlugin)
         registry.register(ConflictPlugin)
-        
+
         registry.enable("simple")
         result = registry.enable("conflict")
         assert result is False
@@ -312,7 +313,7 @@ class TestHealthMonitoring:
         registry = PluginRegistry(app)
         registry.register(SimplePlugin)
         registry.enable("simple")
-        
+
         health = registry.check_health(force=True)
         assert "simple" in health
         assert health["simple"].status == "healthy"
@@ -322,7 +323,7 @@ class TestHealthMonitoring:
         registry = PluginRegistry(app)
         registry.register(SimplePlugin)
         registry.enable("simple")
-        
+
         plugin = registry.get("simple")
         assert plugin.uptime is not None
         assert plugin.uptime >= 0
@@ -338,15 +339,15 @@ class TestHotReload:
         registry = PluginRegistry(app)
         registry.register(SimplePlugin)
         registry.enable("simple")
-        
+
         # Get the plugin before reload
         plugin_before = registry.get("simple")
         assert plugin_before is not None
-        
+
         # Reload
         result = registry.reload("simple")
         assert result is True
-        
+
         # Check that plugin is still available
         plugin_after = registry.get("simple")
         assert plugin_after is not None

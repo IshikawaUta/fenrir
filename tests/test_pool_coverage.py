@@ -1,7 +1,9 @@
 """Tests for fenrir.pool — ConnectionPool and DatabasePool."""
 import asyncio
+
 import pytest
-from fenrir.pool import ConnectionPool, DatabasePool, _PoolItem, _PoolConnection
+
+from fenrir.pool import ConnectionPool, DatabasePool, _PoolItem
 
 
 def _counter():
@@ -105,6 +107,46 @@ class TestConnectionPoolAcquire:
         # Connection should be discarded, not returned to pool
         assert pool.stats["active"] == 0
 
+    @pytest.mark.anyio
+    async def test_connection_property(self):
+        pool = ConnectionPool(create_func=_counter(), min_size=1, max_size=3)
+        pc = pool.acquire()
+        conn = await pc.__aenter__()
+        assert pc.connection is conn
+        await pc.__aexit__(None, None, None)
+
+    @pytest.mark.anyio
+    async def test_aexit_no_item(self):
+        pool = ConnectionPool(create_func=_counter(), min_size=1, max_size=3)
+        pc = pool.acquire()
+        assert await pc.__aexit__(None, None, None) is False
+
+    @pytest.mark.anyio
+    async def test_acquire_destroys_invalid_idle(self):
+        closed = []
+        pool = ConnectionPool(
+            create_func=_counter(),
+            close_func=lambda c: closed.append(c),
+            validate_func=lambda c: False,
+            min_size=1,
+            max_size=3,
+        )
+        await pool.initialize()
+        async with pool.acquire() as conn:
+            assert conn is not None
+        assert len(closed) == 1
+
+    @pytest.mark.anyio
+    async def test_acquire_create_failure(self):
+        def fail():
+            raise RuntimeError("create failed")
+
+        pool = ConnectionPool(create_func=fail, min_size=0, max_size=3)
+        with pytest.raises(RuntimeError, match="create failed"):
+            async with pool.acquire() as conn:
+                pass
+        assert pool.stats["active"] == 0
+
 
 class TestConnectionPoolClose:
     @pytest.mark.anyio
@@ -112,6 +154,49 @@ class TestConnectionPoolClose:
         pool = ConnectionPool(create_func=_counter(), min_size=0, max_size=3)
         await pool.close()
         assert pool._closed is True
+
+    @pytest.mark.anyio
+    async def test_close_async_close_func(self):
+        closed = []
+
+        async def _async_close(c):
+            closed.append(c)
+
+        pool = ConnectionPool(create_func=_counter(), close_func=_async_close, min_size=2, max_size=5)
+        await pool.initialize()
+        await pool.close()
+        assert len(closed) == 2
+
+    @pytest.mark.anyio
+    async def test_close_func_raises_warns(self, caplog):
+        def bad_close(c):
+            raise RuntimeError("close failed")
+
+        pool = ConnectionPool(create_func=_counter(), close_func=bad_close, min_size=1, max_size=3)
+        await pool.initialize()
+        await pool.close()
+        assert "Error closing connection" in caplog.text
+
+    @pytest.mark.anyio
+    async def test_release_when_not_initialized(self):
+        pool = ConnectionPool(create_func=_counter(), min_size=0, max_size=3)
+        await pool._release(_PoolItem("x"))
+
+    @pytest.mark.anyio
+    async def test_release_when_closed(self):
+        closed = []
+        pool = ConnectionPool(create_func=_counter(), close_func=lambda c: closed.append(c), min_size=1, max_size=3)
+        await pool.initialize()
+        pool._closed = True
+        await pool._release(_PoolItem("c"))
+        assert closed == ["c"]
+
+    @pytest.mark.anyio
+    async def test_discard_when_not_initialized(self):
+        closed = []
+        pool = ConnectionPool(create_func=_counter(), close_func=lambda c: closed.append(c), min_size=0, max_size=3)
+        await pool._discard(_PoolItem("x"))
+        assert closed == ["x"]
 
     @pytest.mark.anyio
     async def test_close_with_connections(self):

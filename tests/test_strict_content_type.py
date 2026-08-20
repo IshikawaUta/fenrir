@@ -1,7 +1,9 @@
 import pytest
 from pydantic import BaseModel
-from fenrir import Fenrir, Body
+
+from fenrir import Fenrir
 from fenrir.testing import TestClient
+
 
 class Item(BaseModel):
     name: str
@@ -23,7 +25,7 @@ async def test_strict_content_type_enabled():
 
     # Request with missing or invalid Content-Type -> 400
     resp = await client.post(
-        "/item", 
+        "/item",
         content=b'{"name": "book"}',
         headers={"Content-Type": "text/plain"}
     )
@@ -43,7 +45,7 @@ async def test_strict_content_type_disabled():
 
     # When disabled, text/plain Content-Type is accepted as long as it contains valid JSON
     resp = await client.post(
-        "/item", 
+        "/item",
         content=b'{"name": "book"}',
         headers={"Content-Type": "text/plain"}
     )

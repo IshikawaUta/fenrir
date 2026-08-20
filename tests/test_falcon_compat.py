@@ -1,7 +1,9 @@
-import pytest
+
 import httpx
-import sys
-from fenrir import Fenrir, Response, install_falcon_compat, falcon
+import pytest
+
+from fenrir import Fenrir, falcon, install_falcon_compat
+
 
 # Verify that install_falcon_compat patches sys.modules
 def test_falcon_global_compat():
@@ -18,7 +20,7 @@ async def test_falcon_request_properties():
         async def on_get(self, req, resp):
             # context persistence
             req.context["passed"] = True
-            
+
             # get_header
             user_agent = req.get_header("User-Agent")
             assert user_agent == "TestClient" or "httpx" in user_agent.lower()
@@ -68,7 +70,7 @@ async def test_falcon_response_properties():
         async def on_get(self, req, resp):
             # status string parsing
             resp.status = falcon.HTTP_201
-            
+
             # set_header and unset_header
             resp.set_header("X-Custom", "Value")
             resp.set_header("X-Remove-Me", "Temporary")

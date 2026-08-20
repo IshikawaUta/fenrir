@@ -1,5 +1,6 @@
 """Tests for fenrir.testing — FenrirTestClient."""
 import pytest
+
 from fenrir import Fenrir
 from fenrir.testing import FenrirTestClient, TestClient
 

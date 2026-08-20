@@ -1,6 +1,7 @@
 import pytest
-from fenrir import Fenrir, APIRouter, Route
-from fenrir.testing import TestClient
+
+from fenrir import APIRouter, Route
+
 
 class CustomRoute(Route):
     def __init__(self, path_pattern, handler, methods=None):

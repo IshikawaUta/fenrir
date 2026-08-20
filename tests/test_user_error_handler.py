@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import HTTPForbidden
+
 
 class CustomAppException(Exception):
     pass

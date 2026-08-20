@@ -1,6 +1,5 @@
-import os
-import pytest
 from fenrir import Fenrir
+
 
 def test_instance_path_resolution(tmp_path):
     app = Fenrir(root_path=str(tmp_path), instance_path=str(tmp_path / "custom_instance"))

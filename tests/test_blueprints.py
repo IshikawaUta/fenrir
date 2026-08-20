@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import Blueprint
+
 
 @pytest.mark.anyio
 async def test_blueprint_lifecycle(app):
@@ -28,7 +30,7 @@ async def test_blueprint_lifecycle(app):
     resp = await client.get("/api/info")
     assert resp.status_code == 200
     assert resp.text == "api info"
-    
+
     assert "before" in called
     assert "after" in called
     assert "teardown" in called

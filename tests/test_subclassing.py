@@ -1,5 +1,5 @@
-import pytest
-from fenrir import Fenrir, request
+from fenrir import request
+
 
 class CustomRequest:
     def __init__(self, scope):

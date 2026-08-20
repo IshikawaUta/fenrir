@@ -12,27 +12,23 @@ Covers:
   - Multiple response models per status (runtime)
 """
 import asyncio
-import gzip
 import json
 import time
 
-import pytest
 import httpx
+import pytest
 from pydantic import BaseModel
 
 from fenrir import (
     Fenrir,
-    WebSocket,
-    WebSocketDisconnect,
-    Depends,
     Response,
-    JSONResponse,
+    WebSocket,
 )
 from fenrir.middleware import (
     CORSMiddleware,
     GZipMiddleware,
-    RequestIDMiddleware,
     RateLimitMiddleware,
+    RequestIDMiddleware,
 )
 from fenrir.pagination import PaginationParams, paginate, paginate_dict
 from fenrir.sessions import (
@@ -41,7 +37,6 @@ from fenrir.sessions import (
     RedisSessionInterface,
     ServerSideSession,
 )
-
 
 # ---------------------------------------------------------------------------
 # CORSMiddleware — HTTP

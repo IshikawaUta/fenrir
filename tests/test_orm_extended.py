@@ -1,15 +1,12 @@
 """Tests for fenrir.orm module — Extended coverage."""
+
+import importlib.util
+
 import pytest
-import tempfile
-import os
 
-try:
-    import aiosqlite
-    HAS_AIOSQLITE = True
-except ImportError:
-    HAS_AIOSQLITE = False
+HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
 
-from fenrir.orm import Database, Model, fields, QuerySet, Field
+from fenrir.orm import Database, Field, Model, QuerySet, fields
 
 pytestmark = pytest.mark.skipif(not HAS_AIOSQLITE, reason="aiosqlite not installed")
 

@@ -1,6 +1,8 @@
-import os
+
 import pytest
-from fenrir import Fenrir
+
+from fenrir.config import Config
+
 
 class DummyConfigObject:
     DEBUG = True
@@ -33,3 +35,34 @@ def test_config_from_envvar(app, tmp_path, monkeypatch):
     monkeypatch.setenv("FENRIR_SETTINGS", str(config_file))
     app.config.from_envvar("FENRIR_SETTINGS")
     assert app.config["SECRET_KEY"] == "env-secret"
+
+
+def test_config_from_object_string(app, tmp_path, monkeypatch):
+    (tmp_path / "confmod.py").write_text("APP_STRING_CONFIG = 42\nlower_ignored = 'x'\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    app.config.from_object("confmod")
+    assert app.config["APP_STRING_CONFIG"] == 42
+    assert "lower_ignored" not in app.config
+
+
+def test_config_from_pyfile_outside_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "outside.py").write_text("X = 1\n")
+    cfg = Config(str(root))
+    with pytest.raises(ValueError, match="outside the application root"):
+        cfg.from_pyfile("../outside.py")
+
+
+def test_config_from_pyfile_missing(tmp_path):
+    cfg = Config(str(tmp_path))
+    assert cfg.from_pyfile("nope.py", silent=True) is False
+    with pytest.raises(OSError):
+        cfg.from_pyfile("nope.py")
+
+
+def test_config_from_envvar_unset(app, monkeypatch):
+    monkeypatch.delenv("FENRIR_MISSING_CONFIG", raising=False)
+    assert app.config.from_envvar("FENRIR_MISSING_CONFIG", silent=True) is False
+    with pytest.raises(RuntimeError, match="not set"):
+        app.config.from_envvar("FENRIR_MISSING_CONFIG")

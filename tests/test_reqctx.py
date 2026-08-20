@@ -1,5 +1,5 @@
-import pytest
-from fenrir import Fenrir, request
+from fenrir import request
+
 
 def test_request_context_isolation(app):
     with app.test_request_context("/one"):

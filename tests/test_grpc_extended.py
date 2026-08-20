@@ -1,7 +1,7 @@
 """Tests for fenrir.grpc module."""
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ═══════════════════════════════════════════════════════════════════════
 # GRPCService Tests
@@ -125,7 +125,7 @@ class TestGRPCServer:
         assert server._running is False
 
     def test_init_custom(self):
-        from fenrir.grpc import GRPCServer, GRPCInterceptor
+        from fenrir.grpc import GRPCInterceptor, GRPCServer
         interceptor = GRPCInterceptor()
         server = GRPCServer(max_workers=5, interceptors=[interceptor])
         assert server._max_workers == 5
@@ -141,7 +141,7 @@ class TestGRPCServer:
         assert svc in server._services
 
     def test_add_interceptor(self):
-        from fenrir.grpc import GRPCServer, GRPCInterceptor
+        from fenrir.grpc import GRPCInterceptor, GRPCServer
         server = GRPCServer()
         interceptor = GRPCInterceptor()
         server.add_interceptor(interceptor)

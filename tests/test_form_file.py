@@ -1,7 +1,9 @@
-import pytest
 import httpx
-from fenrir import Fenrir, Form, File
+import pytest
+
+from fenrir import Fenrir, File, Form
 from fenrir.upload import UploadFile
+
 
 @pytest.mark.anyio
 async def test_form_urlencoded():
@@ -45,3 +47,61 @@ async def test_multipart_file_upload():
             "content_type": "text/plain",
             "content": "Hello Fenrir File"
         }
+
+
+@pytest.mark.anyio
+async def test_multipart_duplicate_fields():
+    app = Fenrir()
+
+    @app.post("/multi")
+    async def multi(tag=Form()):
+        return {"tags": tag}
+
+    body = (
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="tag"\r\n\r\n'
+        b"a\r\n"
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="tag"\r\n\r\n'
+        b"b\r\n"
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="tag"\r\n\r\n'
+        b"c\r\n"
+        b"--b--\r\n"
+    )
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/multi", content=body, headers={"Content-Type": "multipart/form-data; boundary=b"})
+        assert res.status_code == 200
+        assert res.json()["tags"] == ["a", "b", "c"]
+
+
+@pytest.mark.anyio
+async def test_multipart_duplicate_files():
+    app = Fenrir()
+
+    @app.post("/up2")
+    async def up2(f=File()):
+        names = [x.filename for x in f] if isinstance(f, list) else [f.filename]
+        return {"names": names}
+
+    body = (
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="f"; filename="a.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        b"aaa\r\n"
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="f"; filename="b.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        b"bbb\r\n"
+        b"--b\r\n"
+        b'Content-Disposition: form-data; name="f"; filename="c.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        b"ccc\r\n"
+        b"--b--\r\n"
+    )
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/up2", content=body, headers={"Content-Type": "multipart/form-data; boundary=b"})
+        assert res.status_code == 200
+        assert res.json()["names"] == ["a.txt", "b.txt", "c.txt"]

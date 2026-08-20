@@ -1,5 +1,7 @@
 import pytest
+
 from fenrir import render_template
+
 
 @pytest.mark.anyio
 async def test_rendering(app, tmp_path):

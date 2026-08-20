@@ -1,6 +1,8 @@
 import pytest
+
 from fenrir import session
 from fenrir.routing import CONVERTER_PATTERNS
+
 
 # Define a custom converter that checks session
 def custom_converter(val):

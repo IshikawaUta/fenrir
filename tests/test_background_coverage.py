@@ -1,7 +1,6 @@
 """Tests for fenrir.background — BackgroundTask and BackgroundTasks."""
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from fenrir.background import BackgroundTask, BackgroundTasks
 
 

@@ -1,11 +1,11 @@
 """Tests for fenrir.cli — load_app, cmd_routes, cmd_info, etc."""
 import os
 import sys
-import argparse
-import pytest
 from unittest.mock import MagicMock, patch
-from fenrir.cli import load_app, cmd_routes, cmd_info, format_col
 
+import pytest
+
+from fenrir.cli import cmd_info, cmd_routes, format_col, load_app
 
 # ═══════════════════════════════════════════════════════════════════════
 # format_col Tests

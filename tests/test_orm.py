@@ -1,16 +1,12 @@
 """Tests for fenrir.orm — Lightweight async ORM."""
-import asyncio
+
+import importlib.util
+
 import pytest
-import tempfile
-import os
 
-try:
-    import aiosqlite
-    HAS_AIOSQLITE = True
-except ImportError:
-    HAS_AIOSQLITE = False
+HAS_AIOSQLITE = importlib.util.find_spec("aiosqlite") is not None
 
-from fenrir.orm import Database, Model, fields, QuerySet
+from fenrir.orm import Database, Model, fields
 
 pytestmark = pytest.mark.skipif(not HAS_AIOSQLITE, reason="aiosqlite not installed")
 
@@ -81,7 +77,7 @@ class TestModel:
             __tablename__ = "users"
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
-        
+
         user = User(name="Alice")
         assert user.name == "Alice"
         assert user.id is None
@@ -91,7 +87,7 @@ class TestModel:
             __tablename__ = "users"
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
-        
+
         user = User(id=1, name="Alice")
         data = user.to_dict()
         assert data["id"] == 1
@@ -101,7 +97,7 @@ class TestModel:
         class Item(Model):
             __tablename__ = "items"
             name = fields.String(max_length=100)
-        
+
         assert "id" in Item._meta["fields"]
         assert Item._meta["fields"]["id"].primary_key is True
 
@@ -109,14 +105,14 @@ class TestModel:
         class User(Model):
             __tablename__ = "users"
             name = fields.String(max_length=100)
-        
+
         assert User._meta["tablename"] == "users"
 
     def test_model_custom_tablename(self):
         class MyModel(Model):
             __tablename__ = "custom_table"
             name = fields.String(max_length=100)
-        
+
         assert MyModel._meta["tablename"] == "custom_table"
 
 
@@ -132,6 +128,19 @@ class TestDatabase:
     def test_database_parse_dialect(self):
         assert Database("sqlite:///test.db")._dialect == "sqlite"
         assert Database("postgresql://localhost")._dialect == "postgresql"
+
+    def test_convert_placeholders(self):
+        sql = "SELECT * FROM users WHERE age > ? AND name = ?"
+        converted = Database._convert_placeholders(sql)
+        assert converted == "SELECT * FROM users WHERE age > $1 AND name = $2"
+
+    def test_convert_placeholders_skips_string_literals(self):
+        sql = "SELECT '?' AS q FROM t WHERE name = ?"
+        converted = Database._convert_placeholders(sql)
+        assert converted == "SELECT '?' AS q FROM t WHERE name = $1"
+
+    def test_convert_placeholders_no_params(self):
+        assert Database._convert_placeholders("SELECT 1") == "SELECT 1"
 
     @pytest.mark.anyio
     async def test_database_connect_disconnect(self):
@@ -171,6 +180,44 @@ class TestDatabase:
         assert len(rows) == 2
         await db.disconnect()
 
+    @pytest.mark.anyio
+    async def test_transaction_commits_changes(self):
+        db = Database("sqlite:///:memory:")
+        await db.connect()
+        await db.execute("CREATE TABLE tx_items (id INTEGER PRIMARY KEY, name TEXT)")
+        async with db.transaction():
+            await db.execute("INSERT INTO tx_items (name) VALUES (?)", ["Alice"])
+            await db.execute("INSERT INTO tx_items (name) VALUES (?)", ["Bob"])
+        rows = await db.fetch_all("SELECT * FROM tx_items")
+        assert len(rows) == 2
+        await db.disconnect()
+
+    @pytest.mark.anyio
+    async def test_transaction_rolls_back_on_error(self):
+        db = Database("sqlite:///:memory:")
+        await db.connect()
+        await db.execute("CREATE TABLE tx_rollback (id INTEGER PRIMARY KEY, name TEXT)")
+        with pytest.raises(RuntimeError, match="boom"):
+            async with db.transaction():
+                await db.execute("INSERT INTO tx_rollback (name) VALUES (?)", ["Alice"])
+                raise RuntimeError("boom")
+        rows = await db.fetch_all("SELECT * FROM tx_rollback")
+        assert len(rows) == 0
+        await db.disconnect()
+
+    @pytest.mark.anyio
+    async def test_nested_transaction_shares_outer(self):
+        db = Database("sqlite:///:memory:")
+        await db.connect()
+        await db.execute("CREATE TABLE tx_nested (id INTEGER PRIMARY KEY, name TEXT)")
+        async with db.transaction():
+            await db.execute("INSERT INTO tx_nested (name) VALUES (?)", ["Outer"])
+            async with db.transaction():
+                await db.execute("INSERT INTO tx_nested (name) VALUES (?)", ["Inner"])
+        rows = await db.fetch_all("SELECT * FROM tx_nested")
+        assert len(rows) == 2
+        await db.disconnect()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # ORM Integration Tests
@@ -183,11 +230,11 @@ class TestORMIntegration:
             __tablename__ = "test_users"
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
-        
+
         db = Database("sqlite:///:memory:")
         db.register_model(User)
         await db.create_all()
-        
+
         row = await db.fetch_one("SELECT name FROM sqlite_master WHERE type='table' AND name='test_users'")
         assert row is not None
         await db.disconnect()
@@ -199,28 +246,28 @@ class TestORMIntegration:
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
             email = fields.String(max_length=255)
-        
+
         db = Database("sqlite:///:memory:")
         db.register_model(User)
         await db.create_all()
         User.bind(db)
-        
+
         user = await User.create(name="Alice", email="alice@example.com")
         assert user.id is not None
         assert user.name == "Alice"
-        
+
         user2 = await User.get(id=user.id)
         assert user2 is not None
         assert user2.name == "Alice"
-        
+
         await user.update(name="Alice Smith")
         user3 = await User.get(id=user.id)
         assert user3.name == "Alice Smith"
-        
+
         await user.delete()
         user4 = await User.get(id=user.id)
         assert user4 is None
-        
+
         await db.disconnect()
 
     @pytest.mark.anyio
@@ -230,22 +277,22 @@ class TestORMIntegration:
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
             age = fields.Integer(default=0)
-        
+
         db = Database("sqlite:///:memory:")
         db.register_model(User)
         await db.create_all()
         User.bind(db)
-        
+
         await User.create(name="Alice", age=25)
         await User.create(name="Bob", age=30)
         await User.create(name="Charlie", age=35)
-        
+
         users = await User.filter(age__gte=30).all()
         assert len(users) == 2
-        
+
         users = await User.all().order_by("-age")
         assert users[0].name == "Charlie"
-        
+
         await db.disconnect()
 
     @pytest.mark.anyio
@@ -254,16 +301,16 @@ class TestORMIntegration:
             __tablename__ = "count_users"
             id = fields.Integer(primary_key=True)
             name = fields.String(max_length=100)
-        
+
         db = Database("sqlite:///:memory:")
         db.register_model(User)
         await db.create_all()
         User.bind(db)
-        
+
         await User.create(name="Alice")
         await User.create(name="Bob")
-        
+
         count = await User.count()
         assert count == 2
-        
+
         await db.disconnect()

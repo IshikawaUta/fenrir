@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.anyio
 async def test_teardown_request_called_despite_errors(app):
     called = []
@@ -21,6 +22,6 @@ async def test_teardown_request_called_despite_errors(app):
     resp = await client.get("/")
     assert resp.status_code == 200
     assert resp.text == "Hello"
-    
+
     assert "one" in called
     assert "two" in called

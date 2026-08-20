@@ -1,9 +1,9 @@
 """Tests for fenrir.queue — RedisQueue with fakeredis."""
 import asyncio
-import json
+
 import pytest
-from unittest.mock import patch, MagicMock
-from fenrir.queue import Job, JobStatus, RedisQueue, Queue
+
+from fenrir.queue import Job, JobStatus, Queue, RedisQueue
 
 
 def _make_job(handler="test", priority=0, **kw):
@@ -111,6 +111,64 @@ class TestRedisQueue:
         await redis_queue.enqueue(job)
         # Delayed job goes to delayed sorted set, not pending
         assert await redis_queue.size() == 0
+
+    @pytest.mark.anyio
+    async def test_delayed_job_promoted_after_ready(self, redis_queue):
+        job = _make_job(delay=0.1)
+        await redis_queue.enqueue(job)
+        # Not ready yet — nothing is dequeued and the job stays queued
+        assert await redis_queue.dequeue() is None
+        await asyncio.sleep(0.15)
+        result = await redis_queue.dequeue()
+        assert result is not None
+        assert result.id == job.id
+        assert result.status == JobStatus.RUNNING
+
+    @pytest.mark.anyio
+    async def test_delayed_job_promoted_preserves_priority(self, redis_queue):
+        low = _make_job(handler="low", priority=0, delay=0.05)
+        high = _make_job(handler="high", priority=10, delay=0.1)
+        await redis_queue.enqueue(low)
+        await redis_queue.enqueue(high)
+        await asyncio.sleep(0.15)
+        # Both are ready; the higher priority job must be dequeued first
+        first = await redis_queue.dequeue()
+        assert first is not None
+        assert first.handler == "high"
+        second = await redis_queue.dequeue()
+        assert second is not None
+        assert second.handler == "low"
+
+    @pytest.mark.anyio
+    async def test_requeue_delayed_honors_delay(self, redis_queue):
+        job = _make_job()
+        await redis_queue.enqueue(job)
+        assert await redis_queue.dequeue() is not None
+        job.delay = 0.1
+        await redis_queue.requeue(job)
+        assert await redis_queue.dequeue() is None
+        await asyncio.sleep(0.15)
+        result = await redis_queue.dequeue()
+        assert result is not None
+        assert result.id == job.id
+
+    @pytest.mark.anyio
+    async def test_worker_processes_delayed_job(self, fake_redis):
+        rq = RedisQueue(prefix="test:")
+        rq._redis = fake_redis
+        q = Queue(backend=rq)
+        count = 0
+
+        @q.handler("inc")
+        async def inc():
+            nonlocal count
+            count += 1
+
+        await q.enqueue("inc", delay=0.1)
+        from fenrir.queue import Worker
+        w = Worker(q, concurrency=1, poll_interval=0.01, max_jobs=1)
+        await w.run()
+        assert count == 1
 
     @pytest.mark.anyio
     async def test_context_manager(self, redis_queue):

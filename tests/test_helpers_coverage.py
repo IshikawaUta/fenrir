@@ -2,13 +2,18 @@
 import io
 import os
 import tempfile
+
 import pytest
-from unittest.mock import MagicMock, patch
+
 from fenrir import Fenrir
-from fenrir.helpers import (
-    redirect, _build_url_path, url_for, send_file, send_from_directory,
-)
 from fenrir.exceptions import HTTPNotFound
+from fenrir.helpers import (
+    _build_url_path,
+    redirect,
+    send_file,
+    send_from_directory,
+    url_for,
+)
 
 
 class TestRedirect:
@@ -35,6 +40,30 @@ class TestRedirect:
         resp = redirect("/fallback")
         assert resp.status == 302
 
+    def test_redirect_relative_no_context_error(self):
+        resp = redirect("foo/bar")
+        assert resp.status == 302
+        assert resp.headers["location"] == "foo/bar"
+
+    @pytest.mark.anyio
+    async def test_redirect_relative_in_context(self):
+        from fenrir import Fenrir
+
+        app = Fenrir()
+
+        @app.get("/current/page")
+        def current():
+            return "ok"
+
+        @app.get("/go/deep")
+        def go():
+            return redirect("elsewhere")
+
+        client = app.test_client()
+        resp = await client.get("/go/deep")
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/go/elsewhere"
+
 
 class TestBuildUrlPath:
     def test_simple_path(self):
@@ -44,6 +73,10 @@ class TestBuildUrlPath:
     def test_typed_param(self):
         result = _build_url_path("/users/<int:id>", {"id": 42})
         assert result == "/users/42"
+
+    def test_unknown_typed_param(self):
+        result = _build_url_path("/items/<foo:bar>", {"foo": 1})
+        assert result == "/items/1"
 
     def test_string_param(self):
         result = _build_url_path("/items/<string:name>", {"name": "hello"})
@@ -104,17 +137,17 @@ class TestUrlFor:
         # Use a test that actually tests the behavior by temporarily removing
         # the app context and expecting a specific error
         app = Fenrir()
-        
+
         @app.route("/test")
         async def test_route():
             return "ok"
-        
+
         # Create a separate app context, then remove it to test the edge case
         with app.app_context():
             # Within app context, url_for should work
             result = url_for("test_route")
             assert result == "/test"
-            
+
         # Without app context, url_for should still work because it falls back
         # to _active_app, but _active_app is set by the app context manager
         # So we need to test that we actually get the right result
@@ -130,6 +163,76 @@ class TestUrlFor:
             result = url_for("search", q="test", page=1)
             assert "q=test" in result
             assert "page=1" in result
+
+    def test_url_for_no_active_app(self, monkeypatch):
+
+        def _none():
+            return None
+
+        monkeypatch.setattr("fenrir.app._get_active_app", _none)
+        with pytest.raises(RuntimeError, match="without an active application context"):
+            url_for("whatever")
+
+    def test_url_for_class_view(self):
+        app = Fenrir()
+
+        class MyView:
+            def __call__(self):
+                return "ok"
+
+        app.add_route("/view", MyView(), ["GET"])
+        with app.app_context():
+            result = url_for("MyView")
+            assert result == "/view"
+
+    def test_url_for_blueprint_multiple_routes(self):
+        from fenrir._app_core import Blueprint
+        app = Fenrir()
+
+        @app.route("/plain")
+        def plain():
+            pass
+
+        bp = Blueprint("users", url_prefix="/api")
+
+        @bp.get("/a")
+        def get_user():
+            pass
+
+        @bp.get("/b")
+        def other():
+            pass
+
+        app.register_blueprint(bp)
+
+        with app.app_context():
+            result = url_for("users.other")
+            assert result == "/api/b"
+
+    def test_url_for_websocket(self):
+        app = Fenrir()
+
+        @app.websocket("/ws1")
+        async def ws_handler():
+            pass
+
+        @app.websocket("/ws2")
+        async def ws_other():
+            pass
+
+        class WsView:
+            def __call__(self):
+                pass
+
+        app.add_websocket_route("/ws3", WsView())
+
+        with app.app_context():
+            result = url_for("ws_other")
+            assert result == "/ws2"
+            result2 = url_for("WsView")
+            assert result2 == "/ws3"
+            with pytest.raises(ValueError, match="Could not build url"):
+                url_for("users.missing")
 
 
 class TestSendFile:
@@ -167,9 +270,20 @@ class TestSendFile:
         finally:
             os.unlink(path)
 
+    def test_send_file_unknown_mimetype(self):
+        with tempfile.NamedTemporaryFile(suffix=".zzzzunknown", delete=False) as f:
+            f.write(b"data")
+            path = f.name
+        try:
+            resp = send_file(path)
+            assert "application/octet-stream" in resp.headers.get("content-type", "")
+        finally:
+            os.unlink(path)
+
     def test_send_file_from_bytes(self):
-        from fenrir.response import Response
         import io
+
+        from fenrir.response import Response
         # Bytes must be wrapped in a file-like object
         bytes_io = io.BytesIO(b"binary data")
         resp = send_file(bytes_io, mimetype="application/octet-stream")

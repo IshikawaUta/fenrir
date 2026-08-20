@@ -1,5 +1,5 @@
-import pytest
-from fenrir import Fenrir, current_app
+from fenrir import current_app
+
 
 def test_app_context_push(app):
     with app.app_context():

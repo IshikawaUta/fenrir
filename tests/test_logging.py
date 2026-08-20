@@ -1,5 +1,5 @@
 import logging
-import pytest
+
 
 def test_logging(app, caplog):
     logger = logging.getLogger("fenrir")

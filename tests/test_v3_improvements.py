@@ -15,30 +15,23 @@ Covers:
   - Signature caching
   - OpenAPI schema caching
 """
-import asyncio
-import json
-import time
 
-import pytest
 import httpx
+import pytest
 from pydantic import BaseModel
 
 from fenrir import (
-    Fenrir,
     Depends,
-    Response,
-    JSONResponse,
+    Fenrir,
     StreamingResponse,
-    HTTPException,
 )
-from fenrir.testing import TestClient
 from fenrir.middleware import CORSMiddleware, GZipMiddleware, RateLimitMiddleware
 from fenrir.security import (
     HTTPDigest,
     OAuth2AuthorizationCodeBearer,
     OpenIDConnect,
 )
-
+from fenrir.testing import TestClient
 
 # =========================================================================
 # 1. PATCH / PUT / DELETE method routing
@@ -732,7 +725,6 @@ class TestSignatureCaching:
 
     def test_signature_caching_works(self):
         """Call inspect.signature twice on the same function, verify cache hit."""
-        import inspect
         from fenrir.dependencies import _get_cached_signature
 
         def sample_func(a: int, b: str = "hello") -> bool:

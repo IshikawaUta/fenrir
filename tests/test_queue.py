@@ -1,8 +1,9 @@
 """Tests for fenrir.queue — Lightweight job queue system."""
 import asyncio
-import pytest
-from fenrir.queue import Queue, Job, Worker, MemoryQueue, JobStatus
 
+import pytest
+
+from fenrir.queue import Job, JobStatus, MemoryQueue, Queue, Worker
 
 # ═══════════════════════════════════════════════════════════════════════
 # Job Tests
@@ -104,21 +105,21 @@ class TestQueueWrapper:
     @pytest.mark.anyio
     async def test_handler_registration(self):
         queue = Queue()
-        
+
         @queue.handler("test_job")
         async def test_handler(x):
             return x * 2
-        
+
         assert "test_job" in queue._handlers
 
     @pytest.mark.anyio
     async def test_enqueue(self):
         queue = Queue()
-        
+
         @queue.handler("test_job")
         async def test_handler(x):
             return x * 2
-        
+
         job = await queue.enqueue("test_job", 5)
         assert job is not None
         assert job.handler == "test_job"
@@ -127,12 +128,12 @@ class TestQueueWrapper:
     async def test_process_next(self):
         queue = Queue()
         results = []
-        
+
         @queue.handler("test_job")
         async def test_handler(x):
             results.append(x * 2)
             return x * 2
-        
+
         await queue.enqueue("test_job", 5)
         job = await queue.process_next()
         assert job.status == JobStatus.COMPLETED
@@ -142,12 +143,12 @@ class TestQueueWrapper:
     async def test_process_sync_handler(self):
         queue = Queue()
         results = []
-        
+
         @queue.handler("sync_job")
         def sync_handler(x):
             results.append(x * 2)
             return x * 2
-        
+
         await queue.enqueue("sync_job", 5)
         job = await queue.process_next()
         assert job.status == JobStatus.COMPLETED
@@ -163,9 +164,9 @@ class TestQueueWrapper:
 
     @pytest.mark.anyio
     async def test_retry_on_failure(self):
-        queue = Queue()
+        queue = Queue(retry_backoff=0.05)
         attempt_count = 0
-        
+
         @queue.handler("failing_job")
         async def failing_handler():
             nonlocal attempt_count
@@ -173,23 +174,26 @@ class TestQueueWrapper:
             if attempt_count < 3:
                 raise ValueError("Not yet")
             return "success"
-        
+
         await queue.enqueue("failing_job", max_retries=3)
-        for _ in range(5):
+        # Retries are scheduled with backoff, so poll until completion.
+        for _ in range(100):
             job = await queue.process_next()
             if job and job.status == JobStatus.COMPLETED:
                 break
+            await asyncio.sleep(0.05)
+        assert job is not None
         assert job.status == JobStatus.COMPLETED
         assert attempt_count == 3
 
     @pytest.mark.anyio
     async def test_cancel_job(self):
         queue = Queue()
-        
+
         @queue.handler("test_job")
         async def test_handler():
             return "done"
-        
+
         job = await queue.enqueue("test_job")
         result = await queue.cancel(job.id)
         assert result is True
@@ -197,12 +201,12 @@ class TestQueueWrapper:
     @pytest.mark.anyio
     async def test_job_timeout(self):
         queue = Queue()
-        
+
         @queue.handler("slow_job")
         async def slow_handler():
             await asyncio.sleep(10)
             return "done"
-        
+
         job = await queue.enqueue("slow_job", timeout=0.1)
         job = await queue.process_next()
         assert job.status == JobStatus.FAILED
@@ -211,11 +215,11 @@ class TestQueueWrapper:
     @pytest.mark.anyio
     async def test_queue_size(self):
         queue = Queue()
-        
+
         @queue.handler("test_job")
         async def test_handler():
             pass
-        
+
         await queue.enqueue("test_job")
         await queue.enqueue("test_job")
         size = await queue.size()
@@ -240,12 +244,12 @@ class TestWorker:
     async def test_worker_processes_jobs(self):
         queue = Queue()
         results = []
-        
+
         @queue.handler("test_job")
         async def test_handler(x):
             results.append(x)
             return x
-        
+
         await queue.enqueue("test_job", 1)
         await queue.enqueue("test_job", 2)
         worker = Worker(queue, concurrency=1, max_jobs=2)
