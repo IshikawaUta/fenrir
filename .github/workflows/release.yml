@@ -1,0 +1,43 @@
+name: Create Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+
+    - name: Extract changelog section for this version
+      run: |
+        python - <<'EOF'
+        import re
+        tag = "${GITHUB_REF_NAME}"
+        text = open("CHANGELOG.md").read()
+        pattern = re.compile(rf"^### {re.escape(tag)}[^\n]*\n(.*?)(?=\n### |\Z)", re.M | re.S)
+        m = pattern.search(text)
+        body = m.group(1).strip() if m else f"No changelog entry found for {tag}."
+        header = f"# {tag}"
+        if tag.startswith("v"):
+            header += f"\n\nFull changes: see [CHANGELOG.md](CHANGELOG.md)"
+        open("/tmp/release_body.md", "w").write(f"{header}\n\n{body}\n")
+        EOF
+
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file /tmp/release_body.md
