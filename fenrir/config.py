@@ -2,6 +2,7 @@ import os
 import types
 from typing import Any, Mapping, Union
 
+
 class Config(dict):
     def __init__(self, root_path: str, defaults: dict = None):
         super().__init__(defaults or {})

@@ -1,28 +1,55 @@
 """Monitoring routes - login, dashboard, health checks, traffic analysis."""
-import os
-import html
 import hmac
+import html
+import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
-from fenrir import render_template, HTMLResponse, JSONResponse, redirect
+from fenrir import HTMLResponse, JSONResponse, redirect
+from fenrir.json import json_loads
 from fenrir.monitoring.core import (
-    _monitoring_data,
+    LOGIN_LOCKOUT_CODE,
+    LOGIN_LOCKOUT_WINDOW,
     _generate_token,
-    _verify_password,
-    check_site_health,
-    check_site_health_async,
-    get_traffic_stats,
-    get_alerts,
-    add_alert,
+    _is_login_locked,
+    _monitoring_data,
+    _record_login_failure,
+    _reset_login_attempts,
     _save_data,
-    get_uptime_stats,
-    get_response_time_history,
+    _verify_password,
+    check_site_health_async,
+    get_alerts,
     get_hourly_traffic,
+    get_response_time_history,
     get_summary,
+    get_traffic_stats,
+    get_uptime_stats,
 )
 
-from fenrir.json import json_loads
+
+def _client_ip(request: Any) -> str:
+    """Best-effort client IP for login rate limiting.
+
+    Uses ``scope["client"]`` (the ASGI peer address) and falls back to
+    ``x-forwarded-for`` / ``x-real-ip`` / ``host`` header.
+    """
+    scope = getattr(request, "scope", None)
+    if scope:
+        client = scope.get("client")
+        if client and isinstance(client, (list, tuple)) and len(client) >= 1:
+            return str(client[0])
+    headers = getattr(request, "headers", None)
+    if headers:
+        forwarded = headers.get("x-forwarded-for")
+        if forwarded:
+            return str(forwarded).split(",")[0].strip()
+        real_ip = headers.get("x-real-ip")
+        if real_ip:
+            return str(real_ip)
+        host = headers.get("host")
+        if host:
+            return str(host).split(":")[0]
+    return "unknown"
 
 
 def register_monitoring_routes(app: Any):
@@ -56,7 +83,7 @@ def register_monitoring_routes(app: Any):
             status=200,
             headers={
                 "Content-Type": "text/html; charset=utf-8",
-                "Set-Cookie": f"monitoring_csrf={csrf_token}; Path=/; SameSite=Lax; Max-Age=300",
+                "Set-Cookie": f"monitoring_csrf={csrf_token}; Path=/; SameSite=Lax; Max-Age=86400",
             },
         )
         return resp
@@ -64,18 +91,18 @@ def register_monitoring_routes(app: Any):
     @app.post(f"{prefix}/login")
     async def monitoring_login():
         from fenrir.context import request
-        
+
         body = request.body
         try:
             body_str = body.decode("utf-8", errors="replace") if body else ""
-        except Exception:
+        except Exception:  # pragma: no cover
             body_str = ""
         form_data = _parse_form(body_str)
-        
+
         username = form_data.get("username", "")
         password = form_data.get("password", "")
         csrf_form = form_data.get("csrf_token", "")
-        
+
         csrf_cookie = request.cookies.get("monitoring_csrf", "")
         if not csrf_form or not csrf_cookie or not hmac.compare_digest(csrf_form, csrf_cookie):
             import secrets
@@ -86,15 +113,35 @@ def register_monitoring_routes(app: Any):
                 status=403,
                 headers={
                     "Content-Type": "text/html; charset=utf-8",
-                    "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=300",
+                    "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=86400",
                 },
             )
             return resp
-        
+
         config_user = app.config.get("MONITORING_USER", "admin")
         config_hash = app.config.get("MONITORING_PASSWORD_HASH", "")
-        
+        ip = _client_ip(request)
+
+        # Brute-force protection: lock out an IP after repeated failures.
+        if _is_login_locked(ip):
+            import secrets
+            new_csrf = secrets.token_hex(32)
+            from fenrir.response import Response
+            resp = Response(
+                body=_render_login_page(
+                    error=f"Too many failed attempts. Please try again in {int(LOGIN_LOCKOUT_WINDOW / 60)} minutes.",
+                    csrf_token=new_csrf,
+                ),
+                status=LOGIN_LOCKOUT_CODE,
+                headers={
+                    "Content-Type": "text/html; charset=utf-8",
+                    "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=86400",
+                },
+            )
+            return resp
+
         if username == config_user and _verify_password(password, config_hash):
+            _reset_login_attempts(ip)
             token = _generate_token(username, app.config.get("MONITORING_SECRET_KEY", ""))
             secure_flag = "; Secure" if os.getenv("MONITORING_SECURE_COOKIES", "").lower() == "true" else ""
             from fenrir.response import Response
@@ -107,7 +154,9 @@ def register_monitoring_routes(app: Any):
                 },
             )
             return resp
-        
+
+        _record_login_failure(ip)
+
         import secrets
         new_csrf = secrets.token_hex(32)
         from fenrir.response import Response
@@ -116,7 +165,7 @@ def register_monitoring_routes(app: Any):
             status=401,
             headers={
                 "Content-Type": "text/html; charset=utf-8",
-                "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=300",
+                "Set-Cookie": f"monitoring_csrf={new_csrf}; Path=/; SameSite=Lax; Max-Age=86400",
             },
         )
         return resp
@@ -127,18 +176,18 @@ def register_monitoring_routes(app: Any):
         token = request.cookies.get("monitoring_token")
         if not _check_token(token):
             return redirect(f"{prefix}/login")
-        
+
         body = request.body
         try:
             body_str = body.decode("utf-8", errors="replace") if body else ""
-        except Exception:
+        except Exception:  # pragma: no cover
             body_str = ""
         form_data = _parse_form(body_str)
         csrf_form = form_data.get("csrf_token", "")
         csrf_cookie = request.cookies.get("monitoring_csrf", "")
         if not csrf_form or not csrf_cookie or not hmac.compare_digest(csrf_form, csrf_cookie):
             return redirect(f"{prefix}/dashboard")
-        
+
         from fenrir.response import Response
         resp = Response(
             body="",
@@ -156,11 +205,11 @@ def register_monitoring_routes(app: Any):
         token = request.cookies.get("monitoring_token")
         if not _check_token(token):
             return redirect(f"{prefix}/login")
-        
+
         traffic = get_traffic_stats()
         alerts = get_alerts(20)
         sites = _monitoring_data.get("sites", [])
-        
+
         health_results = []
         for site in sites:
             hc = _monitoring_data.get("health_checks", {}).get(site)
@@ -174,12 +223,13 @@ def register_monitoring_routes(app: Any):
                     "response_time": None,
                     "checked_at": None,
                 })
-        
+
         return HTMLResponse(_render_dashboard_page(traffic, health_results, alerts))
 
     @app.get(f"{prefix}/api/health")
     async def monitoring_api_health():
         import asyncio
+
         from fenrir.context import request
         token = request.cookies.get("monitoring_token")
         if not _check_token(token):
@@ -221,18 +271,18 @@ def register_monitoring_routes(app: Any):
         body = request.body
         try:
             body_str = body.decode("utf-8", errors="replace") if body else ""
-        except Exception:
+        except Exception:  # pragma: no cover
             body_str = ""
         data = _parse_json(body_str)
         url = data.get("url")
-        
+
         if not url:
             return JSONResponse({"error": "url is required"}, status=400)
-        
+
         allowed_sites = _monitoring_data.get("sites", [])
         if url not in allowed_sites:
             return JSONResponse({"error": "url not in monitored sites"}, status=403)
-        
+
         result = await check_site_health_async(url, allowed_sites)
         _save_data()
         return JSONResponse(result)
@@ -249,7 +299,7 @@ def register_monitoring_routes(app: Any):
             1 for s in _monitoring_data.get("health_checks", {}).values()
             if s.get("status") == "healthy"
         )
-        
+
         return JSONResponse({
             "traffic": traffic,
             "sites_total": sites_count,
@@ -329,12 +379,12 @@ def _parse_json(body: str) -> dict:
         return {}
 
 
-def _render_login_page(error: str = None, csrf_token: str = "") -> str:
+def _render_login_page(error: Optional[str] = None, csrf_token: str = "") -> str:
     """Render the monitoring login page."""
     error_html = ""
     if error:
         error_html = f'<div class="error">{html.escape(error)}</div>'
-    
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -490,10 +540,10 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
     today = traffic.get("today", {})
     yesterday = traffic.get("yesterday", {})
     change_pct = traffic.get("change_percentage", 0)
-    
+
     change_class = "positive" if change_pct >= 0 else "negative"
     change_icon = "+" if change_pct >= 0 else ""
-    
+
     uptime = get_uptime_stats()
     if uptime:
         total_checks = sum(s.get("total_checks", 0) for s in uptime.values())
@@ -502,7 +552,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
     else:
         uptime_pct = 100.0
     uptime_color = "var(--green)" if uptime_pct >= 99 else "var(--yellow)" if uptime_pct >= 95 else "var(--red)"
-    
+
     health_cards = ""
     for site in health_results:
         status = site.get("status", "unknown")
@@ -510,7 +560,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
         rt = site.get("response_time")
         rt_display = f"{rt}ms" if rt is not None else "N/A"
         code = site.get("status_code") or "-"
-        
+
         health_cards += f"""
         <div class="health-card {status_class}">
             <div class="health-status">
@@ -523,7 +573,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
                 <span>{rt_display}</span>
             </div>
         </div>"""
-    
+
     alerts_html = ""
     for alert in alerts[:10]:
         level = alert.get("level", "info")
@@ -534,17 +584,17 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             ts_display = dt.strftime("%H:%M:%S")
         except Exception:
             ts_display = ts[:10]
-        
+
         alerts_html += f"""
         <div class="alert-item {level_class}">
             <span class="alert-time">{ts_display}</span>
             <span class="alert-title">{html.escape(alert.get('title', ''))}</span>
             <span class="alert-msg">{html.escape(alert.get('message', ''))}</span>
         </div>"""
-    
+
     if not alerts_html:
         alerts_html = '<div class="alert-item ok"><span class="alert-msg">No recent alerts</span></div>'
-    
+
     status_codes_html = ""
     for code, count in sorted(today.get("status_codes", {}).items()):
         bar_width = min(count * 100 / max(today.get("total", 1), 1), 100)
@@ -554,7 +604,7 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             <div class="bar-track"><div class="bar-fill" style="width:{bar_width}%"></div></div>
             <span class="bar-value">{count}</span>
         </div>"""
-    
+
     top_paths_html = ""
     for path, count in list(today.get("paths", {}).items())[:5]:
         top_paths_html += f"""
@@ -562,11 +612,11 @@ def _render_dashboard_page(traffic: dict, health_results: list, alerts: list) ->
             <span class="path-name">{html.escape(path)}</span>
             <span class="path-count">{count}</span>
         </div>"""
-    
+
     methods_html = ""
     for method, count in today.get("methods", {}).items():
         methods_html += f'<span class="method-badge">{html.escape(method)} {count}</span>'
-    
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

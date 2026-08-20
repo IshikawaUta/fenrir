@@ -8,8 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from fenrir.request import Request
 from fenrir.response import HTMLResponse
-from fenrir.routing import Router, Route
-from fenrir.openapi import get_swagger_html, get_redoc_html
+from fenrir.routing import Route, Router
 
 logger = logging.getLogger("fenrir")
 
@@ -81,7 +80,7 @@ class FenrirCoreMixin:
         self,
         import_name: str = None,
         title: str = "Fenrir API",
-        version: str = "4.1.2",
+        version: str = "4.2.0",
         template_folder: str = "templates",
         renderer: Any = None,
         docs_url: str = "/docs",
@@ -93,6 +92,7 @@ class FenrirCoreMixin:
         strict_content_type: bool = False,
         route_class: Optional[Type[Route]] = None,
         dev_mode: bool = None,
+        docs_enabled: Optional[bool] = None,
     ):
         self.title = title
         self.version = version
@@ -106,13 +106,13 @@ class FenrirCoreMixin:
                     import importlib
                     try:
                         mod = importlib.import_module(caller_module)
-                        root_path = os.path.dirname(os.path.abspath(mod.__file__))
+                        root_path = os.path.dirname(os.path.abspath(mod.__file__ or ""))
                     except Exception:
                         root_path = os.getcwd()
                 else:
                     root_path = os.getcwd()
-            except Exception:
-                root_path = os.getcwd()
+            except Exception:  # pragma: no cover
+                root_path = os.getcwd()  # pragma: no cover
 
         self.root_path = root_path
 
@@ -134,6 +134,11 @@ class FenrirCoreMixin:
             "SESSION_COOKIE_HTTPONLY": True,
             "SESSION_COOKIE_SECURE": True,
             "SESSION_COOKIE_SAMESITE": None,
+            # Security hardening (opt-in via config)
+            "FENRIR_DOCS_ENABLED": None,   # None = auto (off in production, on in dev)
+            "MAX_CONTENT_LENGTH": None,    # bytes; enables BodyLimitMiddleware when set
+            "RATE_LIMIT_MAX_REQUESTS": None,  # enables RateLimitMiddleware when set
+            "RATE_LIMIT_WINDOW": 60,
         })
 
         from fenrir.sessions import SecureCookieSessionInterface
@@ -146,8 +151,8 @@ class FenrirCoreMixin:
         self.teardown_appcontext_funcs: List[Callable] = []
 
         if renderer is None:
-            from fenrir.templating import Jinja2Renderer
-            self.renderer = Jinja2Renderer(template_folder)
+            from fenrir.templating import LazyJinja2Renderer
+            self.renderer = LazyJinja2Renderer(template_folder)
         else:
             self.renderer = renderer
 
@@ -178,6 +183,22 @@ class FenrirCoreMixin:
             self.dev_mode = os.environ.get("FENRIR_DEV_MODE") == "1"
         self._openapi_schema_cache: Optional[Dict[str, Any]] = None
 
+        # Security: auto-generated docs (OpenAPI/Swagger/ReDoc) are disabled in
+        # production by default. Explicitly enable with docs_enabled=True or the
+        # FENRIR_DOCS_ENABLED config/env value.
+        if docs_enabled is None:
+            docs_enabled = self.config.get("FENRIR_DOCS_ENABLED")
+        if docs_enabled is None:
+            env_val = os.environ.get("FENRIR_DOCS_ENABLED")
+            if env_val is not None:
+                docs_enabled = env_val.lower() in ("1", "true", "yes", "on")
+            else:
+                docs_enabled = not (self.config.get("ENV") == "production" and not self.dev_mode)
+        if not docs_enabled:
+            self.openapi_url = None  # type: ignore[assignment]
+            self.docs_url = None  # type: ignore[assignment]
+            self.redoc_url = None  # type: ignore[assignment]
+
         # Built-in docs endpoints
         if self.openapi_url:
             @self.get(self.openapi_url)
@@ -187,12 +208,16 @@ class FenrirCoreMixin:
         if self.docs_url and self.openapi_url:
             @self.get(self.docs_url)
             async def swagger_ui():
+                from fenrir.openapi import get_swagger_html
                 return HTMLResponse(get_swagger_html(self.openapi_url, f"{self.title} - Swagger UI"))
 
         if self.redoc_url and self.openapi_url:
             @self.get(self.redoc_url)
             async def redoc_ui():
+                from fenrir.openapi import get_redoc_html
                 return HTMLResponse(get_redoc_html(self.openapi_url, f"{self.title} - ReDoc"))
+
+        self._config_security_applied = False
 
     # ── Routing decorators ──────────────────────────────────────────────
 
@@ -239,6 +264,43 @@ class FenrirCoreMixin:
     def add_middleware(self, middleware_class: Any, **options: Any) -> None:
         self._asgi_middlewares.append((middleware_class, options))
         self._asgi_app = None
+
+    def _apply_config_security_middleware(self) -> bool:
+        """Install config-driven security middleware (idempotent).
+
+        Reads ``MAX_CONTENT_LENGTH`` / ``RATE_LIMIT_MAX_REQUESTS`` from
+        ``app.config`` and registers the corresponding opt-in middlewares.
+        Called once at construction and re-checked on first request, so config
+        set after ``Fenrir()`` also takes effect. Returns True if any
+        middleware was newly registered.
+        """
+        if self._config_security_applied:
+            return False
+        self._config_security_applied = True
+
+        added = False
+        max_content_length = self.config.get("MAX_CONTENT_LENGTH")
+        if max_content_length:
+            from fenrir.middleware import BodyLimitMiddleware
+            self._asgi_middlewares.append(
+                (BodyLimitMiddleware, {"max_content_length": int(max_content_length)})
+            )
+            added = True
+
+        rate_limit_max = self.config.get("RATE_LIMIT_MAX_REQUESTS")
+        if rate_limit_max:
+            from fenrir.middleware import RateLimitMiddleware
+            self._asgi_middlewares.append(
+                (
+                    RateLimitMiddleware,
+                    {
+                        "max_requests": int(rate_limit_max),
+                        "window_seconds": int(self.config.get("RATE_LIMIT_WINDOW", 60)),
+                    },
+                )
+            )
+            added = True
+        return added
 
     def mount_wsgi(self, path: str, wsgi_app: Any) -> None:
         from fenrir.compat import WsgiToAsgi

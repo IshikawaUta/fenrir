@@ -6,28 +6,28 @@ Optimized for performance with lazy imports and fast startup.
 from __future__ import annotations
 
 # Core imports only (fast startup)
-from fenrir.app import Fenrir, Blueprint
-from fenrir.context import request, g, current_app, session
+from fenrir.app import Blueprint, Fenrir
+from fenrir.context import current_app, g, request, session
 from fenrir.exceptions import (
-    HTTPException,
     HTTPBadRequest,
-    HTTPUnauthorized,
-    HTTPForbidden,
-    HTTPNotFound,
-    HTTPMethodNotAllowed,
     HTTPConflict,
-    HTTPUnprocessableEntity,
+    HTTPException,
+    HTTPForbidden,
     HTTPInternalServerError,
+    HTTPMethodNotAllowed,
+    HTTPNotFound,
+    HTTPUnauthorized,
+    HTTPUnprocessableEntity,
 )
 from fenrir.response import (
-    Response,
-    JSONResponse,
-    HTMLResponse,
-    TextResponse,
-    RedirectResponse,
-    StreamingResponse,
     FileResponse,
+    HTMLResponse,
+    JSONResponse,
     PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+    TextResponse,
 )
 
 # Lazy-loaded modules (deferred until needed)
@@ -98,6 +98,7 @@ _LAZY_IMPORTS = {
     "RateLimitMiddleware": ("fenrir.middleware", "RateLimitMiddleware"),
     "BodyLimitMiddleware": ("fenrir.middleware", "BodyLimitMiddleware"),
     "CSRFMiddleware": ("fenrir.middleware", "CSRFMiddleware"),
+    "SecurityHeadersMiddleware": ("fenrir.middleware", "SecurityHeadersMiddleware"),
     # Static files
     "StaticFiles": ("fenrir.static", "StaticFiles"),
     # Connection Pooling
@@ -165,7 +166,7 @@ _SUBMODULE_IMPORTS = {
     "performance": "fenrir.performance",
 }
 
-__version__ = "4.1.2"
+__version__ = "4.2.0"
 
 
 def __getattr__(name: str):
@@ -289,6 +290,7 @@ __all__ = [
     "RateLimitMiddleware",
     "BodyLimitMiddleware",
     "CSRFMiddleware",
+    "SecurityHeadersMiddleware",
     # Static files
     "StaticFiles",
     # Pagination

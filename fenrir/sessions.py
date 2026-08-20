@@ -1,5 +1,4 @@
 import time
-from itsdangerous import URLSafeTimedSerializer, BadSignature
 from typing import Any, Dict, Optional
 
 from fenrir.json import json_dumps, json_loads
@@ -55,9 +54,11 @@ class SecureCookieSessionInterface(SessionInterface):
 
     def __init__(self):
         self._cached_key: Optional[str] = None
-        self._cached_serializer: Optional[URLSafeTimedSerializer] = None
+        self._cached_serializer: Optional[Any] = None
 
-    def get_serializer(self, app: Any) -> Optional[URLSafeTimedSerializer]:
+    def get_serializer(self, app: Any) -> Optional[Any]:
+        from itsdangerous import URLSafeTimedSerializer
+
         secret_key = app.config.get("SECRET_KEY")
         if not secret_key:
             return None
@@ -74,6 +75,10 @@ class SecureCookieSessionInterface(SessionInterface):
         val = request.cookies.get(app.config.get("SESSION_COOKIE_NAME", "session"))
         if not val:
             return SecureCookieSession()
+        try:
+            from itsdangerous import BadSignature
+        except ImportError:
+            BadSignature = Exception
         try:
             data = serializer.loads(val)
             return SecureCookieSession(data)
@@ -140,13 +145,13 @@ class RedisSessionInterface(SessionInterface):
     def _run_sync_or_async(self, coro_or_value: Any) -> Any:
         """If *coro_or_value* is a coroutine, run it; otherwise return as-is."""
         import asyncio
-        
+
         if asyncio.iscoroutine(coro_or_value):
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 loop = None
-            
+
             # Handle loop based scenarios
             if loop and loop.is_running():
                 raise RuntimeError(

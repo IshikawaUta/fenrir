@@ -276,6 +276,8 @@ class GZipMiddleware:
                             compressed += compress_obj.flush(zlib.Z_SYNC_FLUSH)
                             if compressed:
                                 await send({"type": "http.response.body", "body": compressed, "more_body": True})
+                            else:  # pragma: no cover
+                                await send({"type": "http.response.body", "body": b"", "more_body": True})
                         else:
                             await send({"type": "http.response.body", "body": chunk, "more_body": True})
                     else:
@@ -293,7 +295,7 @@ class GZipMiddleware:
                         compressed += compress_obj.flush(zlib.Z_FINISH)
                         if compressed:
                             await send({"type": "http.response.body", "body": compressed, "more_body": False})
-                        else:
+                        else:  # pragma: no cover
                             await send({"type": "http.response.body", "body": b"", "more_body": False})
                     else:
                         await send({"type": "http.response.body", "body": full_body, "more_body": False})
@@ -492,6 +494,7 @@ class RateLimitMiddleware:
     async def _is_rate_limited_redis(self, key: str) -> Tuple[bool, float]:
         """Distributed rate limiting using Redis sliding window."""
         import time as _time
+        assert self._redis is not None
         now = _time.monotonic()
         window_start = now - self.window_seconds
         pipe = self._redis.pipeline()
@@ -671,8 +674,8 @@ class CSRFMiddleware:
     def _generate_token(self) -> str:
         import secrets
         if self.secret_key:
-            import hmac
             import hashlib
+            import hmac
             payload = secrets.token_hex(32)
             sig = hmac.new(
                 self.secret_key.encode(), payload.encode(), hashlib.sha256
@@ -683,8 +686,8 @@ class CSRFMiddleware:
     def _verify_token(self, token: str) -> bool:
         if not self.secret_key:
             return True
-        import hmac
         import hashlib
+        import hmac
         try:
             payload, sig = token.rsplit(".", 1)
             expected = hmac.new(
@@ -757,3 +760,75 @@ class CSRFMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+class SecurityHeadersMiddleware:
+    """ASGI middleware that injects secure response headers.
+
+    Applies sane security defaults to every HTTP response:
+
+    - ``Strict-Transport-Security`` (HSTS, opt-out via ``hsts_max_age=None``)
+    - ``X-Frame-Options: DENY`` (clickjacking protection)
+    - ``X-Content-Type-Options: nosniff`` (MIME-sniffing protection)
+    - ``Referrer-Policy: no-referrer``
+    - ``Permissions-Policy`` (blocks geo/camera/microphone by default)
+    - ``Cross-Origin-Opener-Policy: same-origin``
+    - optional ``Content-Security-Policy``
+
+    Existing response headers are never overwritten. Usage::
+
+        app.add_middleware(SecurityHeadersMiddleware)
+        app.add_middleware(SecurityHeadersMiddleware, csp="default-src 'self'")
+    """
+
+    def __init__(
+        self,
+        app: Callable,
+        hsts_max_age: Optional[int] = 31536000,
+        hsts_include_subdomains: bool = True,
+        frame_options: Optional[str] = "DENY",
+        content_type_options: Optional[str] = "nosniff",
+        referrer_policy: Optional[str] = "no-referrer",
+        permissions_policy: Optional[str] = "geolocation=(), microphone=(), camera=()",
+        cross_origin_opener_policy: Optional[str] = "same-origin",
+        csp: Optional[str] = None,
+        xss_protection: Optional[str] = None,
+    ) -> None:
+        self.app = app
+        # Pre-encode headers once at construction (avoids per-request work).
+        self._headers: List[Tuple[bytes, bytes]] = []
+        if hsts_max_age is not None:
+            value = f"max-age={hsts_max_age}"
+            if hsts_include_subdomains:
+                value += "; includeSubDomains"
+            self._headers.append((b"strict-transport-security", value.encode("latin-1")))
+        if frame_options is not None:
+            self._headers.append((b"x-frame-options", frame_options.encode("latin-1")))
+        if content_type_options is not None:
+            self._headers.append((b"x-content-type-options", content_type_options.encode("latin-1")))
+        if referrer_policy is not None:
+            self._headers.append((b"referrer-policy", referrer_policy.encode("latin-1")))
+        if permissions_policy is not None:
+            self._headers.append((b"permissions-policy", permissions_policy.encode("latin-1")))
+        if cross_origin_opener_policy is not None:
+            self._headers.append((b"cross-origin-opener-policy", cross_origin_opener_policy.encode("latin-1")))
+        if csp is not None:
+            self._headers.append((b"content-security-policy", csp.encode("latin-1")))
+        if xss_protection is not None:
+            self._headers.append((b"x-xss-protection", xss_protection.encode("latin-1")))
+
+    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message: Dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                message = dict(message)
+                headers = dict(message.get("headers") or [])
+                for name, value in self._headers:
+                    headers.setdefault(name, value)
+                message["headers"] = list(headers.items())
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
