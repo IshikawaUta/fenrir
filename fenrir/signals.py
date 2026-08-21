@@ -43,10 +43,8 @@ class Signal:
 
     def send(self, sender: Any = None, **kwargs: Any) -> List[Tuple[Callable, Any]]:
         results = []
-        # Copy list to avoid mutation during iteration
         for receiver, s in list(self.receivers):
             if s is None or s == sender:
-                # Use cached async status (bounded cache)
                 receiver_id = id(receiver)
                 is_async = _receiver_is_async_cache.get(receiver_id)
                 if is_async is None:
@@ -61,8 +59,13 @@ class Signal:
                         task.add_done_callback(_handle_signal_error)
                         results.append((receiver, task))
                     except RuntimeError:
-                        # No running loop — schedule for later
-                        logger.debug("No event loop running; async signal receiver '%s' skipped.", getattr(receiver, '__name__', receiver))
+                        # No running loop — fallback to synchronous execution
+                        # (handles edge case where sync receiver was mis-cached as async)
+                        if not inspect.iscoroutinefunction(receiver):
+                            res = receiver(sender, **kwargs)
+                            results.append((receiver, res))
+                        else:
+                            logger.debug("No event loop running; async signal receiver '%s' skipped.", getattr(receiver, '__name__', receiver))
                 else:
                     res = receiver(sender, **kwargs)
                     results.append((receiver, res))
