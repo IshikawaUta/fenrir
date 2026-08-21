@@ -25,8 +25,9 @@ jobs:
     - name: Extract changelog section for this version
       run: |
         python - <<'EOF'
+        import os
         import re
-        tag = "${GITHUB_REF_NAME}"
+        tag = os.environ.get("GITHUB_REF_NAME", "")
         text = open("CHANGELOG.md").read()
         pattern = re.compile(rf"^### {re.escape(tag)}[^\n]*\n(.*?)(?=\n### |\Z)", re.M | re.S)
         m = pattern.search(text)
