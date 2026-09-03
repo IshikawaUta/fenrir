@@ -10,13 +10,15 @@ def _get_fallback_renderer() -> Any:
     """Get (and cache) the default Jinja2 renderer for the current templates dir.
 
     Cached per resolved folder so repeated fallback renders reuse the same
-    Jinja2 environment while still honouring the current working directory.
+    Jinja2 environment. Key includes CWD to avoid stale cache when working
+    directory changes.
     """
     folder = os.path.abspath("templates")
-    renderer = _fallback_renderers.get(folder)
+    cache_key = os.path.join(os.getcwd(), folder)
+    renderer = _fallback_renderers.get(cache_key)
     if renderer is None:
         renderer = Jinja2Renderer("templates")
-        _fallback_renderers[folder] = renderer
+        _fallback_renderers[cache_key] = renderer
     return renderer
 
 class BaseTemplateRenderer:
@@ -85,7 +87,12 @@ def render_template(template_name: str, **context: Any) -> str:
             template_rendered.send(app, template=template_name, context=context)
             return rendered
         except Exception as e:
-            raise HTTPInternalServerError(detail=f"Template rendering failed: {e}") from e
+            # Log the full error server-side but don't leak internal details to client
+            import logging
+            logging.getLogger("fenrir.templating").error(
+                "Template rendering failed for '%s': %s", template_name, e
+            )
+            raise HTTPInternalServerError(detail="Template rendering failed") from e
 
     # Fallback to a default Jinja2Renderer if no active app is configured
     try:
@@ -95,4 +102,8 @@ def render_template(template_name: str, **context: Any) -> str:
             template_rendered.send(app, template=template_name, context=context)
         return rendered
     except Exception as e:
-        raise HTTPInternalServerError(detail=f"Template rendering failed: {e}") from e
+        import logging
+        logging.getLogger("fenrir.templating").error(
+            "Template rendering failed for '%s': %s", template_name, e
+        )
+        raise HTTPInternalServerError(detail="Template rendering failed") from e
