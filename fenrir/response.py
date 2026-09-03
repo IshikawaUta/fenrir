@@ -143,6 +143,9 @@ class Response:
         httponly: bool = False,
         samesite: str = None,
     ):
+        # Sanitize value to prevent HTTP response splitting via \r\n injection
+        if isinstance(value, str):
+            value = value.replace("\r", "").replace("\n", "")
         self.cookies[key] = value
         cookie = self.cookies[key]
         if max_age is not None:
