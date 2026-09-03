@@ -342,7 +342,12 @@ def cmd_bench(args):
 def cmd_new(args):
     """Scaffold a new project directory structure."""
     print_banner()
-    project_dir = args.name
+    # Sanitize project name to prevent path traversal via ..
+    project_name = args.name.strip()
+    if ".." in project_name.replace(os.sep, "/").split("/"):
+        print(f"\033[31mError: Invalid project name '{args.name}'. Path must not contain '..'.\033[0m")
+        sys.exit(1)
+    project_dir = project_name
     if os.path.exists(project_dir):
         print(f"\033[31mError: Directory '{project_dir}' already exists.\033[0m")
         sys.exit(1)
@@ -384,11 +389,12 @@ def cmd_new(args):
             shutil.copy(core_logo_path, os.path.join(project_dir, "favicon.ico"))
 
         # Write app.py
-        app_content = """from fenrir import Fenrir, render_template, send_file
-import os
+        app_content = """import os
 import sys
 
-app = Fenrir(title="My Fenrir Application", version="4.2.0")
+from fenrir import Fenrir, render_template, send_file
+
+app = Fenrir(title="My Fenrir Application", version="4.3.0")
 
 @app.get("/")
 async def home():
@@ -695,7 +701,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v4.2.0</span>
+                <span class="info-value">Fenrir v4.3.0</span>
             </div>
         </div>
 
@@ -739,6 +745,9 @@ if __name__ == "__main__":
 def _update_env_var(key: str, value: str):
     """Update or add a variable in the .env file."""
     import tempfile
+    # Sanitize key and value to prevent newline injection
+    key = key.strip().replace("\r", "").replace("\n", "")
+    value = value.replace("\r", "").replace("\n", "")
     env_file = os.path.join(os.getcwd(), ".env")
     lines = []
     found = False
