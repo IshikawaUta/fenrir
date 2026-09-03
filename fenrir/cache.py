@@ -261,12 +261,28 @@ class RedisCache(CacheBackend):
         prefixed_keys = [self._make_key(k) for k in keys]
         values = await redis.mget(prefixed_keys)
         result = {}
-        for key, value in zip(keys, values):
+        # Collect keys that returned None to check existence
+        none_keys = []
+        none_indices = []
+        for i, (key, value) in enumerate(zip(keys, values)):
             if value is not None:
                 result[key] = self._deserializer(value)
-            elif await redis.exists(self._make_key(key)):
-                # Value is None but key exists
-                result[key] = None
+            else:
+                none_keys.append(prefixed_keys[i])
+                none_indices.append(i)
+        # Batch-check existence for None values
+        if none_keys:
+            try:
+                pipe = redis.pipeline()
+                for pk in none_keys:
+                    pipe.exists(pk)
+                exists_results = await pipe.execute()
+            except AttributeError:
+                # Fallback for test stubs without pipeline support
+                exists_results = [await redis.exists(pk) for pk in none_keys]
+            for idx, exists_val in zip(none_indices, exists_results):
+                if exists_val:
+                    result[keys[idx]] = None
         return result
 
     async def set_many(self, mapping: dict, ttl: Optional[int] = None) -> None:
@@ -378,6 +394,9 @@ class FileCache(CacheBackend):
         await to_thread(_clear)
 
 
+_UNSET = object()  # Sentinel for cache miss
+
+
 class Cache:
     """Unified cache interface with decorator support.
 
@@ -454,6 +473,9 @@ class Cache:
                     key_parts += [f"{k}={repr(v)}" for k, v in sorted(kwargs.items())]
                     cache_key = ":".join(key_parts)
 
+                # Try get first; if backend returns a distinct miss sentinel, compute.
+                # MemoryCache.get returns None for miss, so we use exists+get
+                # as a practical approach (small TOCTOU window is acceptable).
                 if await self.exists(cache_key):
                     return await self.get(cache_key)
 
