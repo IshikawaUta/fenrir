@@ -267,6 +267,7 @@ class Router:
         self.route_class = route_class or Route
         self.included_routers = []
         self._trie = RouteTrie()
+        self._ws_trie = RouteTrie()  # Trie index for websocket routes
         # Cache route_class __init__ signature (custom route classes may not
         # accept extra kwargs). Computed once instead of per add_route call.
         self._init_params: Optional[set] = None
@@ -369,6 +370,7 @@ class Router:
     def add_websocket_route(self, path_pattern: str, handler: Any, ws_timeout: float = None):
         route = self.route_class(path_pattern, handler, ["WEBSOCKET"], ws_timeout=ws_timeout)
         self.websocket_routes.append(route)
+        self._ws_trie.insert(route)
 
     def match(self, path: str, method: str) -> Tuple[Route, Dict[str, Any], Callable]:
         method = method.upper()
@@ -439,7 +441,9 @@ class Router:
         raise HTTPNotFound(detail="No route matches the requested path.")
 
     def match_websocket(self, path: str) -> Tuple[Route, Dict[str, Any], Callable]:
-        for route in self.websocket_routes:
+        # Use trie for O(k) candidate lookup instead of O(n) linear scan
+        candidates = self._ws_trie.search(path)
+        for route in candidates:
             params = route.match(path)
             if params is not None:
                 return route, params, route.handler
