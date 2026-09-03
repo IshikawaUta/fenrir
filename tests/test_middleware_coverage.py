@@ -245,10 +245,13 @@ class TestRateLimit:
         from unittest.mock import AsyncMock
 
         pipe = MagicMock()
-        pipe.execute = AsyncMock(return_value=[None, 5])
+        pipe.execute = AsyncMock(return_value=[None, 5, 1, True])
+        pipe.zadd = MagicMock()
+        pipe.expire = MagicMock()
         redis = MagicMock()
         redis.pipeline = MagicMock(return_value=pipe)
         redis.zrange = AsyncMock(return_value=[])
+        redis.zrem = AsyncMock()
         mw = RateLimitMiddleware(lambda: None, max_requests=2, window_seconds=60, redis_client=object())
         mw._redis = redis
         limited, retry = await mw._is_rate_limited_redis("key")
@@ -357,7 +360,8 @@ class TestBodyLimit:
 class TestCSRF:
     def test_verify_token_no_secret(self):
         mw = CSRFMiddleware(lambda: None, secret_key="")
-        assert mw._verify_token("anything") is True
+        # With empty secret_key, tokens are rejected (F1 fix: silent disable)
+        assert mw._verify_token("anything") is False
 
     @pytest.mark.anyio
     async def test_non_http_passthrough(self):
@@ -392,10 +396,11 @@ class TestCSRF:
         )
         await mw(scope, receive, send)
         start = [m for m in sent if m["type"] == "http.response.start"][0]
-        hdrs = dict(start["headers"])
-        sc = hdrs[b"set-cookie"]
-        assert b"session=abc" in sc
-        assert b"_csrf_token=exist" in sc
+        # Keep as list of tuples to verify BOTH set-cookie headers are preserved
+        cookie_headers = [v for n, v in start["headers"] if n == b"set-cookie"]
+        assert len(cookie_headers) == 2, f"Expected 2 set-cookie headers, got {len(cookie_headers)}: {cookie_headers}"
+        assert b"session=abc" in cookie_headers[0]
+        assert b"_csrf_token=exist" in cookie_headers[1]
 
     @pytest.mark.anyio
     async def test_safe_method_no_existing_token(self):
@@ -414,7 +419,9 @@ class TestCSRF:
         scope = _scope("http", "GET", headers=[(b"cookie", b"foo=1; bar=2"), (b"x-extra", b"1")])
         await mw(scope, receive, send)
         start = [m for m in sent if m["type"] == "http.response.start"][0]
-        assert b"_csrf_token=" in dict(start["headers"])[b"set-cookie"]
+        cookie_headers = [v for n, v in start["headers"] if n == b"set-cookie"]
+        assert len(cookie_headers) == 1
+        assert b"_csrf_token=" in cookie_headers[0]
 
     @pytest.mark.anyio
     async def test_unsafe_missing_token(self):

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import hashlib
+import hmac
 import logging
 import secrets
 import time
+import urllib.parse
 import uuid
 import zlib
 from collections import defaultdict, deque
@@ -107,6 +110,10 @@ class CORSMiddleware:
 
         if method == "OPTIONS":
             cors_headers = self._get_cors_headers(origin, is_preflight=True)
+            # Always include Vary: Origin for proper cache behavior (RFC 7231)
+            h = self._header_name_bytes
+            if h["vary"] not in cors_headers:
+                cors_headers[h["vary"]] = b"Origin"
             # Always respond to preflight with 204, even if origin is disallowed.
             # Passing through to the app would return 404/500 for a valid preflight.
             await send({
@@ -497,23 +504,22 @@ class RateLimitMiddleware:
         assert self._redis is not None
         now = _time.monotonic()
         window_start = now - self.window_seconds
+        unique_id = f"{now}:{uuid.uuid4().hex[:8]}"
         pipe = self._redis.pipeline()
         pipe.zremrangebyscore(key, 0, window_start)
         pipe.zcard(key)
+        pipe.zadd(key, {unique_id: now})
+        pipe.expire(key, self.window_seconds)
         results = await pipe.execute()
         current_count = results[1]
         if current_count >= self.max_requests:
+            # Remove the entry we just added since we're over limit
+            await self._redis.zrem(key, unique_id)
             oldest = await self._redis.zrange(key, 0, 0, withscores=True)
             if oldest:
                 retry_after = self.window_seconds - (now - oldest[0][1])
                 return True, max(retry_after, 0.0)
             return True, float(self.window_seconds)
-        # Only add the request AFTER confirming it's allowed
-        unique_id = f"{now}:{uuid.uuid4().hex[:8]}"
-        add_pipe = self._redis.pipeline()
-        add_pipe.zadd(key, {unique_id: now})
-        add_pipe.expire(key, self.window_seconds)
-        await add_pipe.execute()
         return False, 0.0
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
@@ -671,28 +677,27 @@ class CSRFMiddleware:
         self.safe_methods = safe_methods or self.SAFE_METHODS
         self.auto_generate = auto_generate
 
+    def _derive_key(self) -> bytes:
+        """Derive a proper HMAC key from the secret_key using HKDF-like construction."""
+        return hashlib.sha256(f"fenrir-csrf:{self.secret_key}".encode("utf-8")).digest()
+
     def _generate_token(self) -> str:
-        import secrets
         if self.secret_key:
             import hashlib
             import hmac
             payload = secrets.token_hex(32)
-            sig = hmac.new(
-                self.secret_key.encode(), payload.encode(), hashlib.sha256
-            ).hexdigest()
+            derived = self._derive_key()
+            sig = hmac.new(derived, payload.encode(), hashlib.sha256).hexdigest()
             return f"{payload}.{sig}"
         return secrets.token_hex(32)
 
     def _verify_token(self, token: str) -> bool:
         if not self.secret_key:
-            return True
-        import hashlib
-        import hmac
+            return False
         try:
             payload, sig = token.rsplit(".", 1)
-            expected = hmac.new(
-                self.secret_key.encode(), payload.encode(), hashlib.sha256
-            ).hexdigest()
+            derived = self._derive_key()
+            expected = hmac.new(derived, payload.encode(), hashlib.sha256).hexdigest()
             return hmac.compare_digest(sig, expected)
         except (ValueError, AttributeError):
             return False
@@ -705,7 +710,6 @@ class CSRFMiddleware:
         method = scope.get("method", "").upper()
         if method in self.safe_methods:
             if self.auto_generate:
-                # Reuse existing valid token from cookie if present
                 existing_token = None
                 for k, v in scope.get("headers", []):
                     if k == b"cookie":
@@ -716,22 +720,37 @@ class CSRFMiddleware:
                                 existing_token = part.split("=", 1)[1]
                                 break
                 token = existing_token if existing_token else self._generate_token()
+                scope["_csrf_token"] = token
                 async def send_with_csrf(message: Dict[str, Any]) -> None:
                     if message["type"] == "http.response.start":
-                        headers = dict(message.get("headers", []))
-                        cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax"
-                        # Append, don't replace — preserve existing set-cookie headers (e.g., session)
-                        existing_cookies = headers.get(b"set-cookie", b"")
-                        if existing_cookies:
-                            headers[b"set-cookie"] = existing_cookies + b"\r\n" + cookie_val.encode("latin-1")
-                        else:
-                            headers[b"set-cookie"] = cookie_val.encode("latin-1")
-                        message["headers"] = list(headers.items())
+                        headers = list(message.get("headers", []))
+                        cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax".encode("latin-1")
+                        headers.append((b"set-cookie", cookie_val))
+                        message["headers"] = headers
                     await send(message)
                 await self.app(scope, receive, send_with_csrf)
             else:
                 await self.app(scope, receive, send)
             return
+
+        # For unsafe methods: buffer body, check CSRF from header or form, replay body
+        body_chunks: List[bytes] = []
+        done = False
+
+        async def _buffer():
+            nonlocal done
+            while not done:
+                msg = await receive()
+                if msg.get("type") == "http.request":
+                    body_chunks.append(msg.get("body", b""))
+                    if not msg.get("more_body", False):
+                        done = True
+                        return
+                else:
+                    return
+
+        await _buffer()
+        full_body = b"".join(body_chunks)
 
         # Extract CSRF token from header
         header_token = None
@@ -746,20 +765,46 @@ class CSRFMiddleware:
                     if part.startswith(f"{self.cookie_name}="):
                         cookie_token = part.split("=", 1)[1]
 
+        # Fallback: read CSRF token from form body (application/x-www-form-urlencoded)
+        if not header_token and cookie_token and full_body:
+            try:
+                content_type = ""
+                for k, v in scope.get("headers", []):
+                    if k == b"content-type":
+                        content_type = v.decode("latin-1")
+                        break
+                if "application/x-www-form-urlencoded" in content_type:
+                    parsed = urllib.parse.parse_qs(full_body.decode("utf-8", errors="replace"))
+                    if "csrf_token" in parsed:
+                        header_token = parsed["csrf_token"][0]
+            except Exception:
+                pass
+
         if not header_token or not cookie_token or not secrets.compare_digest(header_token, cookie_token) or not self._verify_token(header_token):
-            body = json_dumps({"detail": "CSRF token missing or invalid."})
+            body_resp = json_dumps({"detail": "CSRF token missing or invalid."})
             await send({
                 "type": "http.response.start",
                 "status": 403,
                 "headers": [
                     (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode("latin-1")),
+                    (b"content-length", str(len(body_resp)).encode("latin-1")),
                 ],
             })
-            await send({"type": "http.response.body", "body": body.encode("utf-8")})
+            await send({"type": "http.response.body", "body": body_resp.encode("utf-8")})
             return
 
-        await self.app(scope, receive, send)
+        # Replay buffered body to downstream app
+        idx = 0
+        async def replay():
+            nonlocal idx
+            if idx >= len(body_chunks):
+                return {"type": "http.disconnect"}
+            chunk = body_chunks[idx]
+            more = idx < len(body_chunks) - 1
+            idx += 1
+            return {"type": "http.request", "body": chunk, "more_body": more}
+
+        await self.app(scope, replay, send)
 
 
 class SecurityHeadersMiddleware:
