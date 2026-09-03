@@ -79,12 +79,16 @@ class EventSourceResponse(Response):
             })
 
     def _format_event(self, item: Any) -> str:
+        def _sanitize_sse_value(val: str) -> str:
+            """Remove \r and \n from SSE field values to prevent injection."""
+            return val.replace("\r", "").replace("\n", "")
+
         if isinstance(item, dict):
             out = []
             if "id" in item:
-                out.append(f"id: {item['id']}")
+                out.append(f"id: {_sanitize_sse_value(str(item['id']))}")
             if "event" in item:
-                out.append(f"event: {item['event']}")
+                out.append(f"event: {_sanitize_sse_value(str(item['event']))}")
             if "data" in item:
                 data_val = str(item["data"])
                 for line in data_val.split("\n"):
