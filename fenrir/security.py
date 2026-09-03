@@ -1,4 +1,6 @@
 import base64
+import re
+import urllib.parse
 from typing import Any, Dict, Optional, Tuple
 
 from fenrir.exceptions import HTTPException
@@ -158,7 +160,6 @@ class WebSocketTokenAuth(SecurityBase):
         # Fall back to query parameter
         if token is None:
             query_string = scope.get("query_string", b"").decode("latin-1")
-            import urllib.parse
             params = urllib.parse.parse_qs(query_string)
             token_vals = params.get(self.query_param, [])
             if token_vals:
@@ -294,10 +295,9 @@ class HTTPDigest(HTTPBase):
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             return None
         # Parse digest header into a dict of key=value pairs
-        import re
         digest_part = auth[7:]  # strip "Digest "
-        parts = re.findall(r'(\w+)=(?:"([^"]+)"|([^\s,]+))', digest_part)
-        return {k: v or v2 for k, v, v2 in parts}
+        parts = re.findall(r'(\w+)=(?:"([^"]*)"|([^\s,]+))', digest_part)
+        return {k: (v if v != "" else v2) for k, v, v2 in parts}
 
 
 class OAuth2(SecurityBase):
