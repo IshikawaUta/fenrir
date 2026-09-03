@@ -1,4 +1,5 @@
 """Tests for fenrir.performance module."""
+import asyncio
 import time
 
 import pytest
@@ -84,6 +85,19 @@ class TestObjectPool:
         stats = pool.stats
         assert stats == {"pool_size": 0, "acquired": 1, "max_size": 100}
         pool.release(obj)
+
+    def test_get_lock_creates_lock(self):
+        pool = ObjectPool(dict)
+        assert pool._lock is None
+        lock = pool._get_lock()
+        assert isinstance(lock, asyncio.Lock)
+        assert pool._lock is lock
+
+    def test_get_lock_returns_same_lock(self):
+        pool = ObjectPool(dict)
+        lock1 = pool._get_lock()
+        lock2 = pool._get_lock()
+        assert lock1 is lock2
 
     def test_global_pools(self):
         assert _dict_pool is not None
