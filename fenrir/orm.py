@@ -504,7 +504,7 @@ class QuerySet:
         return result
 
     async def update(self, **kwargs: Any) -> int:
-        table = self.model_class._meta["tablename"]
+        table = self._safe_table()
         where, params = self._build_where()
         set_parts = []
         set_values = []
