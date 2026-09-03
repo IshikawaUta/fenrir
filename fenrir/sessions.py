@@ -154,11 +154,11 @@ class RedisSessionInterface(SessionInterface):
 
             # Handle loop based scenarios
             if loop and loop.is_running():
-                raise RuntimeError(
-                    "Cannot run async Redis operations from a synchronous "
-                    "function inside an async context. Use an async Redis "
-                    "client (e.g., redis.asyncio) or make open_session/save_session async."
-                )
+                # In an async context, we can't block — schedule as a task instead
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(asyncio.run, coro_or_value)
+                    return future.result(timeout=30)
             elif loop:
                 return loop.run_until_complete(coro_or_value)
             else:
@@ -263,8 +263,8 @@ class InMemorySessionBackend:
         self._last_cleanup = now
         self._do_cleanup()
 
-    def _cleanup(self) -> None:
-        """Force immediate cleanup of expired sessions."""
+    def cleanup(self) -> None:
+        """Force immediate cleanup of expired sessions. Safe to call externally."""
         self._last_cleanup = 0
         self._do_cleanup()
 

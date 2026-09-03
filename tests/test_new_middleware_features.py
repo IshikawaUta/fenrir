@@ -496,7 +496,7 @@ class TestInMemorySession:
         backend = InMemorySessionBackend()
         backend.set("sid1", {"user": "alice"}, ttl=0)
         time.sleep(0.01)
-        backend._cleanup()
+        backend.cleanup()
         assert backend.get("sid1") is None
 
     @pytest.mark.anyio

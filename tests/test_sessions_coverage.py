@@ -172,9 +172,9 @@ async def test_run_sync_or_async_running_loop():
         return 1
 
     c = coro()
-    with pytest.raises(RuntimeError, match="Cannot run async Redis"):
-        iface._run_sync_or_async(c)
-    c.close()
+    # F9 fix: Instead of raising RuntimeError, we now run via ThreadPoolExecutor
+    result = iface._run_sync_or_async(c)
+    assert result == 1
 
 
 def test_run_sync_or_async_new_loop():
@@ -331,7 +331,7 @@ def test_inmemory_backend_cleanup():
     backend = InMemorySessionBackend()
     backend.set("old", {"x": 1}, ttl=-10)
     backend.set("new", {"y": 2}, ttl=100)
-    backend._cleanup()
+    backend.cleanup()
     assert "old" not in backend._store
     assert "new" in backend._store
 
