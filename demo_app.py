@@ -42,7 +42,7 @@ logger = logging.getLogger("demo")
 #   3. Program:   Fenrir(dev_mode=True) di bawah ini
 app = Fenrir(
     title="Fenrir Hybrid Framework Demo",
-    version="4.2.0",
+    version="4.3.0",
     dev_mode=os.getenv("FENRIR_DEV_MODE") == "1",
     # The demo intentionally shows the interactive docs; production apps get
     # them disabled by default (ENV=production) unless docs_enabled=True.

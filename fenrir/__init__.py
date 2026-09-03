@@ -166,7 +166,7 @@ _SUBMODULE_IMPORTS = {
     "performance": "fenrir.performance",
 }
 
-__version__ = "4.2.0"
+__version__ = "4.3.0"
 
 
 def __getattr__(name: str):
