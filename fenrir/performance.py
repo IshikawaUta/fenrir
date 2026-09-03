@@ -17,6 +17,7 @@ Usage::
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import OrderedDict
@@ -51,6 +52,7 @@ class ObjectPool:
         self._reset_func = reset_func
         self._pool: list = []
         self._acquired = 0
+        self._lock = asyncio.Lock()
 
     def acquire(self) -> Any:
         if self._pool:
@@ -58,6 +60,10 @@ class ObjectPool:
             return self._pool.pop()
         self._acquired += 1
         return self._factory()
+
+    async def acquire_async(self) -> Any:
+        async with self._lock:
+            return self.acquire()
 
     def release(self, obj: Any) -> None:
         if self._reset_func:
@@ -69,6 +75,10 @@ class ObjectPool:
         self._acquired -= 1
         if len(self._pool) < self._max_size:
             self._pool.append(obj)
+
+    async def release_async(self, obj: Any) -> None:
+        async with self._lock:
+            self.release(obj)
 
     def clear(self) -> None:
         self._pool.clear()
