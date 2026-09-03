@@ -33,10 +33,11 @@ class Config(dict):
             filepath = filename
         else:
             filepath = os.path.join(self.root_path, filename)
-        # Security: ensure the resolved path is within root_path (for relative paths)
+        # Security: ensure the resolved path is within root_path
+        real_root = os.path.realpath(self.root_path)
+        real_filepath = os.path.realpath(filepath)
+        # Allow absolute paths that exist, but reject relative paths that escape root
         if not os.path.isabs(filename):
-            real_root = os.path.realpath(self.root_path)
-            real_filepath = os.path.realpath(filepath)
             if not real_filepath.startswith(real_root + os.sep) and real_filepath != real_root:
                 raise ValueError(
                     f"Config file '{filename}' is outside the application root directory."
