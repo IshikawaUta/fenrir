@@ -85,9 +85,17 @@ def _get_validation_error():
 # Module-level cache for inspect.signature() results — avoids repeated
 # signature introspection on every request for every handler/dependency.
 _signature_cache: Dict[Callable, inspect.Signature] = {}
+_SIGNATURE_CACHE_MAX = 2048
 
 # Module-level cache for pydantic TypeAdapter — avoids recompilation on every request.
 _type_adapter_cache: Dict[Any, Any] = {}
+_TYPE_ADAPTER_CACHE_MAX = 2048
+
+
+def _evict_if_needed(cache: dict, max_size: int) -> None:
+    """Evict oldest entry if cache exceeds max size."""
+    if len(cache) >= max_size:
+        cache.pop(next(iter(cache)))
 
 
 def _get_cached_type_adapter(annotation: type) -> Any:
@@ -97,6 +105,7 @@ def _get_cached_type_adapter(annotation: type) -> Any:
     except (KeyError, TypeError):
         adapter = _get_type_adapter()(annotation)
         try:
+            _evict_if_needed(_type_adapter_cache, _TYPE_ADAPTER_CACHE_MAX)
             _type_adapter_cache[annotation] = adapter
         except TypeError:
             pass  # unhashable type, skip caching
@@ -115,6 +124,7 @@ def _get_cached_signature(func: Callable) -> inspect.Signature:
     except (ValueError, TypeError):
         raise
     try:
+        _evict_if_needed(_signature_cache, _SIGNATURE_CACHE_MAX)
         _signature_cache[func] = sig
     except TypeError:
         pass  # unhashable func — don't cache
