@@ -73,13 +73,18 @@ class ConnectionPool(Generic[T]):
         self._active: int = 0
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._lock: Optional[asyncio.Lock] = None
-        self._init_lock: asyncio.Lock = asyncio.Lock()
+        self._init_lock: Optional[asyncio.Lock] = None
         self._closed = False
         self._initialized = False
 
+    def _get_init_lock(self) -> asyncio.Lock:
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        return self._init_lock
+
     async def initialize(self) -> None:
         """Initialize the pool and pre-fill with min_size connections."""
-        async with self._init_lock:
+        async with self._get_init_lock():
             if self._initialized:
                 return
             self._semaphore = asyncio.Semaphore(self._max_size)
