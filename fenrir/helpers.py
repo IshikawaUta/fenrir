@@ -112,17 +112,19 @@ def send_file(
 ) -> Response:
     if isinstance(path_or_file, (str, bytes)):
         filepath = os.fsdecode(os.path.abspath(path_or_file))
-        if not os.path.exists(filepath) or not os.path.isfile(filepath):
+        # Resolve symlinks and verify the path is a real file
+        real_filepath = os.path.realpath(filepath)
+        if not os.path.exists(real_filepath) or not os.path.isfile(real_filepath):
             raise HTTPNotFound(detail="File not found")
         if mimetype is None:
-            mimetype, _ = mimetypes.guess_type(filepath)
+            mimetype, _ = mimetypes.guess_type(real_filepath)
             if mimetype is None:
                 mimetype = "application/octet-stream"
-        name = download_name or os.path.basename(filepath)
+        name = download_name or os.path.basename(real_filepath)
         # Always use FileResponse for efficient streaming
         from fenrir.response import FileResponse
         return FileResponse(
-            filepath,
+            real_filepath,
             media_type=mimetype,
             filename=name if as_attachment else None,
         )
