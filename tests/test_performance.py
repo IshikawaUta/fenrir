@@ -92,6 +92,21 @@ class TestObjectPool:
         assert isinstance(obj, dict)
         _dict_pool.release(obj)
 
+    @pytest.mark.anyio
+    async def test_acquire_async(self):
+        pool = ObjectPool(dict)
+        obj = await pool.acquire_async()
+        assert isinstance(obj, dict)
+        assert pool.stats["acquired"] == 1
+
+    @pytest.mark.anyio
+    async def test_release_async(self):
+        pool = ObjectPool(dict)
+        obj = await pool.acquire_async()
+        await pool.release_async(obj)
+        assert pool.stats["acquired"] == 0
+        assert pool.stats["pool_size"] == 1
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # ResponseCache
