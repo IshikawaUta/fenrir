@@ -220,6 +220,8 @@ class GraphQLRouter:
             )
 
     def _get_graphiql_html(self, path: str) -> str:
+        import html as _html
+        safe_path = _html.escape(path, quote=True)
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -232,7 +234,7 @@ class GraphQLRouter:
     <script crossorigin src="https://unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/graphiql/graphiql.min.js"></script>
     <script>
-        const fetcher = GraphiQL.createFetcher({{ url: '{path}' }});
+        const fetcher = GraphiQL.createFetcher({{ url: '{safe_path}' }});
         ReactDOM.render(
             React.createElement(GraphiQL, {{ fetcher }}),
             document.getElementById('graphiql')
