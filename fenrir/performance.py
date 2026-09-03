@@ -54,11 +54,6 @@ class ObjectPool:
         self._acquired = 0
         self._lock: Optional[asyncio.Lock] = None
 
-    def _get_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
-
     def acquire(self) -> Any:
         if self._pool:
             self._acquired += 1
@@ -67,7 +62,9 @@ class ObjectPool:
         return self._factory()
 
     async def acquire_async(self) -> Any:
-        async with self._get_lock():
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
             return self.acquire()
 
     def release(self, obj: Any) -> None:
@@ -82,7 +79,9 @@ class ObjectPool:
             self._pool.append(obj)
 
     async def release_async(self, obj: Any) -> None:
-        async with self._get_lock():
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
             self.release(obj)
 
     def clear(self) -> None:

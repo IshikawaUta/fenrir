@@ -47,20 +47,6 @@ class TestConnectionPoolInit:
         assert stats["idle"] == 0
         assert stats["max_size"] == 10
 
-    def test_get_init_lock_creates_lock(self):
-        pool = ConnectionPool(create_func=lambda: 1)
-        assert pool._init_lock is None
-        lock = pool._get_init_lock()
-        assert isinstance(lock, asyncio.Lock)
-        assert pool._init_lock is lock
-
-    def test_get_init_lock_returns_same_lock(self):
-        pool = ConnectionPool(create_func=lambda: 1)
-        lock1 = pool._get_init_lock()
-        lock2 = pool._get_init_lock()
-        assert lock1 is lock2
-
-
 class TestConnectionPoolInitialize:
     @pytest.mark.anyio
     async def test_initialize_pre_fills(self):
