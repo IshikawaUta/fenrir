@@ -10,9 +10,9 @@ minor release:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 4.2.x   | :white_check_mark: |
-| 4.1.x   | :white_check_mark: (security fixes only) |
-| < 4.1   | :x:                |
+| 4.3.x   | :white_check_mark: |
+| 4.2.x   | :white_check_mark: (security fixes only) |
+| < 4.2   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -54,7 +54,8 @@ publicly.
 Fenrir bakes security features in rather than bolting them on:
 
 - **CSRF protection** via `CSRFMiddleware` (constant-time token comparison,
-  signed tokens, cookie-overwrite prevention).
+  HMAC-SHA256 key derivation, rejects tokens when `secret_key` is empty,
+  cookie-overwrite prevention, form-body token fallback).
 - **Rate limiting** (`RateLimitMiddleware`) per IP/user, with optional Redis
   backend for distributed deployments.
 - **Body size limits** (`BodyLimitMiddleware`) to mitigate DoS via oversized

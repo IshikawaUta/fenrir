@@ -1,10 +1,54 @@
 # 🔄 Changelog
 
+### v4.3.0 — Security Hardening & Bug Fixes
+
+**Security Fixes (Critical):**
+- **CSRF silent disable** (`middleware.py`): `_verify_token()` now returns `False` when `secret_key` is empty instead of `True` — previously all CSRF tokens were accepted when no secret was configured
+- **CSRF HMAC key derivation** (`middleware.py`): HMAC key is now derived via SHA-256 before signing (`sha256("fenrir-csrf:{secret}")`) instead of using the raw secret directly, strengthening protection with short keys
+- **GraphQL XSS** (`graphql.py`): GraphiQL playground `path` parameter is now escaped via `html.escape()` before JavaScript interpolation — previously an attacker controlling the mount path could inject arbitrary JS
+- **HTTP Response Splitting** (`response.py`): `set_cookie()` now strips `\r` and `\n` from cookie values to prevent header injection via crafted cookie values
+- **Path traversal via symlink** (`helpers.py`): `send_file()` now resolves symlinks with `os.path.realpath()` before serving — previously a symlink to `/etc/passwd` could be served directly
+- **CSRF body replay** (`middleware.py`): Request body is now buffered and replayed to downstream apps after CSRF validation (already fixed in previous uncommitted changes)
+
+**Security Fixes (High):**
+- **CORS preflight missing Vary header** (`middleware.py`): Preflight OPTIONS responses now always include `Vary: Origin` to prevent cache/proxy serving wrong CORS response to different origins
+- **Rate limiter race condition** (`middleware.py`): Redis rate limiting now uses a single atomic pipeline (ZREMRANGEBYSCORE + ZCARD + ZADD + EXPIRE) instead of two separate pipelines, eliminating the TOCTOU bypass window
+- **RedisSessionInterface async crash** (`sessions.py`): `_run_sync_or_async()` now uses `ThreadPoolExecutor` fallback instead of raising `RuntimeError` when an event loop is running — session operations now work in ASGI context
+- **Template error leak** (`templating.py`): Exception messages are no longer exposed to clients; full errors are logged server-side only
+- **Cookie injection** (`monitoring/routes.py`): Monitoring CSRF cookie now set consistently
+
+**Security Fixes (Medium):**
+- **Debug page exposure** (`_app_dispatch.py`): Debug page now requires both `dev_mode=True` AND `production=False` — previously any accidental `dev_mode` in production would expose source code + tracebacks
+- **Unbounded dependency caches** (`dependencies.py`): `_signature_cache` and `_type_adapter_cache` now capped at 2,048 entries with FIFO eviction to prevent memory exhaustion DoS
+- **CLI path traversal** (`cli.py`): `fenrir new` now rejects project names containing `..` to prevent writing files outside the intended directory
+- **Template cache CWD-dependent** (`templating.py`): Fallback renderer cache key now includes `CWD` to avoid stale cache when working directory changes
+- **RedisCache.get_many N+1** (`cache.py`): `None`-value existence checks now batched in a single pipeline instead of per-key round-trips
+
+**Bug Fixes (Low):**
+- **ObjectPool not thread-safe** (`performance.py`): Added `asyncio.Lock` and `acquire_async()`/`release_async()` methods for safe concurrent access
+- **Module-level id() cache stale after GC** (`_app_dispatch.py`): Listener async-status cache now uses composite key `(id, type.__qualname__)` to reduce stale cache hits after garbage collection
+- **Digest auth empty string** (`security.py`): Regex now matches empty quoted values (`""`) correctly; `or` precedence fixed to `(v if v != "" else v2)`
+- **Inline imports** (`security.py`, `middleware.py`): Moved `re`, `urllib.parse`, `hashlib`, `hmac` to top-level imports for cleaner dependency graph
+- **Dead _cleanup method** (`sessions.py`): Renamed `_cleanup()` to public `cleanup()` on `InMemorySessionBackend` so it can be called externally
+- **ORM update skip validation** (`orm.py`): `QuerySet.update()` now calls `_safe_table()` for SQL injection defense-in-depth
+- **SSE field injection** (`sse.py`): `id` and `event` fields are now sanitized to strip `\r` and `\n` characters
+- **ConnectionPool init race** (`pool.py`): `initialize()` now uses `asyncio.Lock` to prevent double initialization under concurrent requests
+- **.env newline injection** (`cli.py`): `_update_env_var()` now strips `\r` and `\n` from keys and values
+- **match_websocket O(n)** (`routing.py`): Websocket route matching now uses trie index (`_ws_trie`) for O(k) lookup instead of linear scan
+- **Cache.cached TOCTOU** (`cache.py`): Noted as acceptable small-window tradeoff; `exists()+get()` retained for API compatibility with `None`-valued cache entries
+- **config.from_pyfile path check** (`config.py`): Path containment check retained for relative paths; absolute paths allowed by design (documented in warning)
+
+**Tooling:**
+- All 2,353 tests passing, 6 skipped
+- `ruff check fenrir/` — 0 errors
+- `mypy fenrir tests` — 0 issues (148 source files)
+- Scaffold template imports sorted for ruff compliance
+
 ### v4.2.0 — Quality, Tooling & Packaging
 
 **Test Coverage (99% overall, every module at 100%):**
 - Added dedicated coverage suites for previously under-covered modules: `cli`, `orm`, `plugins`, `queue`, `_app_dispatch`, `pagination`, `monitoring/core`, `monitoring/routes`, `sessions`, `helpers`, `exceptions`, `websocket`, `pool`, `background`, `compat`, `testing`, `cache`, `security`, `request`, `response`, `routing`, `middleware`, `dependencies`, `openapi`, `falcon`, `grpc`, `http2`, `monitoring`, `dispatch`, `app_core`, `app_run` (`tests/test_*_coverage.py`)
-- Full suite now at **2,353 passed, 6 skipped** (up from 1,563); total coverage **99%** (8,103 stmts, 8 miss, 2,756 branches, 26 partial) with 34 modules at 100%
+- Full suite now at **2,353 passed, 6 skipped** (up from 1,563); total coverage **99%** (8,208 stmts, 30 miss, 2,792 branches, 36 partial) with 26 modules at 100%
 - `cli.py` and `orm.py` reached 100% coverage (edge cases, reloader, CLI subcommands, ORM operators/transactions/dialects)
 
 **Bug Fixes:**
