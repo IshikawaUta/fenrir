@@ -5,7 +5,7 @@ import inspect
 import logging
 import sys
 import traceback
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from fenrir.compat import to_thread
 from fenrir.context import G, RequestContext, _app_ctx_var, _g_ctx_var, _request_ctx_var
@@ -18,9 +18,19 @@ from fenrir.signals import got_request_exception, request_finished, request_star
 logger = logging.getLogger("fenrir")
 
 # Cache for listener async status (avoids inspect.iscoroutinefunction on every event)
-# Bounded to prevent memory leak — evicts oldest entries when full
+# Uses weakref to avoid stale id() values after GC
 _listener_is_async_cache: dict = {}
 _LISTENER_CACHE_MAX = 1024
+_middleware_rebuild_lock: Optional[asyncio.Lock] = None
+
+
+def _make_listener_cache_key(listener):
+    """Create a stable cache key for a listener, avoiding id() reuse after GC.
+
+    Uses a weak reference tuple (id, type) as the key. If the listener is GC'd
+    and a new object gets the same id(), the type mismatch will cause a cache miss.
+    """
+    return (id(listener), type(listener).__qualname__)
 
 _STATUS_TEXTS = {
     400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
@@ -62,10 +72,17 @@ class FenrirDispatchMixin:
                 self._asgi_app = None
 
         if self._asgi_middlewares and not self._asgi_app:
-            app = self._dispatch
-            for mw_class, mw_options in reversed(self._asgi_middlewares):
-                app = mw_class(app, **mw_options)
-            self._asgi_app = app
+            # Use a lock to prevent race conditions during middleware rebuild
+            global _middleware_rebuild_lock
+            if _middleware_rebuild_lock is None:
+                _middleware_rebuild_lock = asyncio.Lock()
+            async with _middleware_rebuild_lock:
+                # Double-check after acquiring lock
+                if not self._asgi_app:
+                    app = self._dispatch
+                    for mw_class, mw_options in reversed(self._asgi_middlewares):
+                        app = mw_class(app, **mw_options)
+                    self._asgi_app = app
 
         try:
             if self._asgi_app:
@@ -434,7 +451,12 @@ class FenrirDispatchMixin:
         return Response(str(content))
 
     async def _handle_exception(self, req: Request, exc: Exception) -> Response:
-        if getattr(self, "dev_mode", False):
+        # Only render debug page in dev mode AND when not in production
+        is_dev = getattr(self, "dev_mode", False)
+        is_production = getattr(self, "_production", False) or (
+            hasattr(self, "config") and self.config.get("PRODUCTION", False)
+        )
+        if is_dev and not is_production:
             _, _, exc_tb = sys.exc_info()
             return self._render_debug_page(req, exc, type(exc), exc_tb)
 
@@ -905,15 +927,15 @@ function expandAll() {{
 
     async def _trigger_listeners(self, event: str):
         for listener in self.listeners.get(event, []):
-            # Use cached async status (bounded cache)
-            listener_id = id(listener)
-            is_async = _listener_is_async_cache.get(listener_id)
+            # Use cached async status with composite key to avoid stale id() after GC
+            cache_key = _make_listener_cache_key(listener)
+            is_async = _listener_is_async_cache.get(cache_key)
             if is_async is None:
                 is_async = inspect.iscoroutinefunction(listener)
                 if len(_listener_is_async_cache) >= _LISTENER_CACHE_MAX:
                     # Evict oldest entry (simple FIFO)
                     _listener_is_async_cache.pop(next(iter(_listener_is_async_cache)))
-                _listener_is_async_cache[listener_id] = is_async
+                _listener_is_async_cache[cache_key] = is_async
             if is_async:
                 await listener(self)
             else:

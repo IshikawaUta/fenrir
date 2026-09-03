@@ -800,7 +800,8 @@ class TestDispatchListeners:
             called.append(1)
 
         app.listeners["cached"] = [sync_listener]
-        d._listener_is_async_cache[id(sync_listener)] = False
+        cache_key = d._make_listener_cache_key(sync_listener)
+        d._listener_is_async_cache[cache_key] = False
         await app._trigger_listeners("cached")
         assert called == [1]
 
