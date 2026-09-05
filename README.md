@@ -795,7 +795,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 Fenrir is thoroughly covered by an automated test suite comprising **2,358 tests** (plus 6 intentional skips) validating every single component: trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard, dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, CLI tooling, and the built-in monitoring dashboard.
 
-**Coverage**: **99%** overall (8,208 statements, 2,792 branches) — every `fenrir` module at 100%. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**, with ruff linting, mypy type-checking, and the coverage report uploaded to **Codecov**.
+**Coverage**: **99%** overall (8,233 statements, 2,814 branches) — every `fenrir` module at 100%. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**, with ruff linting, mypy type-checking, and the coverage report uploaded to **Codecov**.
 
 Run the test suite locally:
 
