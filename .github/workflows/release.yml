@@ -17,6 +17,9 @@ jobs:
   release-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/fenrir-framework
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -63,7 +66,4 @@ jobs:
 
     - name: Publish to PyPI
       if: startsWith(github.ref, 'refs/tags/')
-      environment:
-        name: pypi
-        url: https://pypi.org/fenrir-framework
       uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
