@@ -107,6 +107,14 @@ class TestObjectPool:
         assert pool.stats["acquired"] == 0
         assert pool.stats["pool_size"] == 1
 
+    @pytest.mark.anyio
+    async def test_release_async_creates_lock(self):
+        pool = ObjectPool(dict)
+        obj = pool.acquire()
+        assert pool._lock is None
+        await pool.release_async(obj)
+        assert pool._lock is not None
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # ResponseCache
