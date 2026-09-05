@@ -335,3 +335,23 @@ async def test_file_read_oserror(static_dir, monkeypatch):
         "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
     })
     assert messages[-1]["more_body"] is False
+
+
+@pytest.mark.anyio
+async def test_cache_control_default(static_dir):
+    files = StaticFiles(directory=str(static_dir))
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
+    })
+    headers = dict(messages[0]["headers"])
+    assert headers[b"cache-control"] == b"public, max-age=0"
+
+
+@pytest.mark.anyio
+async def test_cache_control_custom(static_dir):
+    files = StaticFiles(directory=str(static_dir), cache_control="public, max-age=31536000, immutable")
+    messages = await _call_static(files, {
+        "type": "http", "method": "GET", "path": "/hello.txt", "headers": [],
+    })
+    headers = dict(messages[0]["headers"])
+    assert headers[b"cache-control"] == b"public, max-age=31536000, immutable"

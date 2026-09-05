@@ -765,7 +765,7 @@ class CSRFMiddleware:
                     if part.startswith(f"{self.cookie_name}="):
                         cookie_token = part.split("=", 1)[1]
 
-        # Fallback: read CSRF token from form body (application/x-www-form-urlencoded)
+        # Fallback: read CSRF token from form body (application/x-www-form-urlencoded or multipart/form-data)
         if not header_token and cookie_token and full_body:
             try:
                 content_type = ""
@@ -777,6 +777,27 @@ class CSRFMiddleware:
                     parsed = urllib.parse.parse_qs(full_body.decode("utf-8", errors="replace"))
                     if "csrf_token" in parsed:
                         header_token = parsed["csrf_token"][0]
+                elif "multipart/form-data" in content_type:
+                    # Extract boundary from Content-Type
+                    boundary = None
+                    for part in content_type.split(";"):
+                        part = part.strip()
+                        if part.startswith("boundary="):
+                            boundary = part.split("=", 1)[1].strip().strip('"')
+                            break
+                    if boundary:
+                        sep = ("--" + boundary).encode("latin-1")
+                        for chunk in full_body.split(sep):
+                            if b'name="csrf_token"' in chunk:
+                                # Strip headers (everything before first \r\n\r\n)
+                                header_end = chunk.find(b"\r\n\r\n")
+                                if header_end != -1:
+                                    value = chunk[header_end + 4:]
+                                    # Strip trailing \r\n
+                                    if value.endswith(b"\r\n"):
+                                        value = value[:-2]
+                                    header_token = value.decode("utf-8", errors="replace")
+                                break
             except Exception:
                 pass
 

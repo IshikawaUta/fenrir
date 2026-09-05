@@ -869,6 +869,44 @@ class TestCSRFMiddleware:
             set_cookie = res.headers.get("set-cookie", "")
             assert "_csrf_token=" not in set_cookie
 
+    @pytest.mark.anyio
+    async def test_csrf_multipart_form_data(self):
+        from fenrir.middleware import CSRFMiddleware
+
+        app = Fenrir()
+        app.add_middleware(CSRFMiddleware, secret_key="test-secret")
+
+        @app.post("/upload")
+        async def upload():
+            return {"ok": True}
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            # GET to obtain token
+            res = await client.get("/upload")
+            set_cookie = res.headers.get("set-cookie", "")
+            token = set_cookie.split("_csrf_token=")[1].split(";")[0]
+            client.cookies.set("_csrf_token", token)
+
+            # POST multipart with csrf_token in form field
+            boundary = "----FormBoundary7MA4YWxkTrZu0gW"
+            body = (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="csrf_token"\r\n\r\n'
+                f"{token}\r\n"
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="file"; filename="test.txt"\r\n'
+                f"Content-Type: text/plain\r\n\r\n"
+                f"hello\r\n"
+                f"--{boundary}--\r\n"
+            )
+            res = await client.post(
+                "/upload",
+                content=body.encode("utf-8"),
+                headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+            )
+            assert res.status_code == 200
+            assert res.json() == {"ok": True}
+
 
 # =========================================================================
 # 13. GZip streaming compression

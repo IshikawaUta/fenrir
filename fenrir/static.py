@@ -35,6 +35,8 @@ class StaticFiles:
 
         app = Fenrir()
         app.mount("/static", StaticFiles(directory="static"))
+        # Production with long cache:
+        app.mount("/static", StaticFiles(directory="static", cache_control="public, max-age=31536000, immutable"))
     """
 
     def __init__(
@@ -42,9 +44,11 @@ class StaticFiles:
         directory: str,
         html: bool = False,
         check_dir: bool = True,
+        cache_control: str = "public, max-age=0",
     ) -> None:
         self.directory = os.path.abspath(directory)
         self.html = html
+        self.cache_control = cache_control
         if check_dir and not os.path.isdir(self.directory):
             raise RuntimeError(f"Directory '{self.directory}' does not exist.")
 
@@ -136,7 +140,7 @@ class StaticFiles:
             (b"content-type", content_type.encode("latin-1")),
             (b"content-length", str(st.st_size).encode("latin-1")),
             (b"etag", etag.encode("latin-1")),
-            (b"cache-control", b"public, max-age=0"),
+            (b"cache-control", self.cache_control.encode("latin-1")),
         ]
         if mtime_header:
             headers.append((b"last-modified", mtime_header.encode("latin-1")))
