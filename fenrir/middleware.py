@@ -814,6 +814,8 @@ class CSRFMiddleware:
             await send({"type": "http.response.body", "body": body_resp.encode("utf-8")})
             return
 
+        scope["_csrf_token"] = header_token
+
         # Replay buffered body to downstream app
         idx = 0
         async def replay():

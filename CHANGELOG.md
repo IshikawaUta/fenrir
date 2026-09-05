@@ -1,5 +1,10 @@
 # 🔄 Changelog
 
+### v4.3.2 — CSRF Token Scope Fix
+
+**Bug Fixes:**
+- **CSRF token missing on POST re-render** (`middleware.py`): `scope["_csrf_token"]` is now set after successful CSRF validation for unsafe methods (POST/PUT/DELETE) — previously only set for safe methods (GET/HEAD/OPTIONS), causing `{{ csrf_token }}` to be `None` when re-rendering forms after validation errors
+
 ### v4.3.1 — Bug Fixes & Publish Workflow Fix
 
 **Bug Fixes:**

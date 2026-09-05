@@ -947,6 +947,40 @@ class TestCSRFMiddleware:
         # If CSRF passes, app is called (200). If fails, 403.
         assert messages[0]["status"] in (200, 403)
 
+    @pytest.mark.anyio
+    async def test_csrf_post_sets_scope_token(self):
+        """After successful POST CSRF validation, scope['_csrf_token'] is set."""
+        from fenrir.middleware import CSRFMiddleware
+
+        captured_scope = {}
+
+        async def app(scope, receive, send):
+            captured_scope.update(scope)
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = CSRFMiddleware(app=app, secret_key="test-secret")
+        token = middleware._generate_token()
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/action",
+            "headers": [
+                (b"x-csrf-token", token.encode()),
+                (b"cookie", f"_csrf_token={token}".encode()),
+            ],
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(msg):
+            pass
+
+        await middleware(scope, receive, send)
+        assert captured_scope.get("_csrf_token") == token
+
 
 # =========================================================================
 # 13. GZip streaming compression
