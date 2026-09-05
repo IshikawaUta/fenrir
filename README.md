@@ -113,7 +113,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.3.0")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.3.1")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -241,7 +241,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v4.3.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.3.1 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir

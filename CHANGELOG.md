@@ -1,5 +1,17 @@
 # 🔄 Changelog
 
+### v4.3.1 — Bug Fixes & Publish Workflow Fix
+
+**Bug Fixes:**
+- **StaticFiles missing cache_control** (`static.py`): Added `cache_control` parameter to `StaticFiles.__init__` — previously hardcoded to `public, max-age=0`, now configurable (e.g., `cache_control="public, max-age=31536000, immutable"` for production)
+- **CSRF multipart/form-data** (`middleware.py`): CSRF token extraction now handles `multipart/form-data` bodies — previously only `application/x-www-form-urlencoded` was parsed, so file upload forms with embedded CSRF tokens were rejected
+
+**Tooling:**
+- Merged `release.yml` and `publish.yml` into single workflow — previously `GITHUB_TOKEN`-created releases didn't trigger the publish workflow, requiring manual `workflow_dispatch`
+- All 2,358 tests passing, 6 skipped
+- `ruff check fenrir/` — 0 errors
+- `mypy fenrir tests` — 0 issues
+
 ### v4.3.0 — Security Hardening & Bug Fixes
 
 **Security Fixes (Critical):**

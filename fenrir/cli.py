@@ -394,7 +394,7 @@ import sys
 
 from fenrir import Fenrir, render_template, send_file
 
-app = Fenrir(title="My Fenrir Application", version="4.3.0")
+app = Fenrir(title="My Fenrir Application", version="4.3.1")
 
 @app.get("/")
 async def home():
@@ -701,7 +701,7 @@ if __name__ == "__main__":
             </div>
             <div class="info-item">
                 <span class="info-label">Framework Engine</span>
-                <span class="info-value">Fenrir v4.3.0</span>
+                <span class="info-value">Fenrir v4.3.1</span>
             </div>
         </div>
 
