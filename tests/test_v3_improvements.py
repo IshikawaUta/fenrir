@@ -1044,6 +1044,61 @@ class TestCSRFMiddleware:
         assert b"_csrf_token=" in cookie_headers[0]
         assert b"Max-Age=604800" in cookie_headers[0]
 
+    @pytest.mark.anyio
+    async def test_csrf_graceful_fallback_replays_body(self):
+        """When CSRF fails with multi-part body, fail_replay replays all chunks."""
+        from fenrir.middleware import CSRFMiddleware
+
+        captured_chunks = []
+
+        async def app(scope, receive, send):
+            while True:
+                msg = await receive()
+                if msg.get("type") == "http.disconnect":
+                    break
+                captured_chunks.append(msg.get("body", b""))
+                if not msg.get("more_body"):
+                    break
+            body = b'{"detail": "CSRF failed"}'
+            await send({
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+
+        middleware = CSRFMiddleware(app=app, secret_key="test-secret")
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/action",
+            "headers": [
+                (b"cookie", b"_csrf_token=wrong-token"),
+            ],
+        }
+
+        chunk_count = 0
+
+        async def receive():
+            nonlocal chunk_count
+            chunk_count += 1
+            if chunk_count == 1:
+                return {"type": "http.request", "body": b"chunk1", "more_body": True}
+            elif chunk_count == 2:
+                return {"type": "http.request", "body": b"chunk2", "more_body": True}
+            else:
+                return {"type": "http.request", "body": b"chunk3", "more_body": False}
+
+        async def send(msg):
+            pass
+
+        await middleware(scope, receive, send)
+        assert captured_chunks == [b"chunk1", b"chunk2", b"chunk3"]
+
 
 # =========================================================================
 # 13. GZip streaming compression
