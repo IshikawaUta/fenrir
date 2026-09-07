@@ -811,14 +811,23 @@ class TestCSRFMiddleware:
     async def test_csrf_post_without_token_rejected(self):
         from fenrir.middleware import CSRFMiddleware
 
-        app = Fenrir()
-        app.add_middleware(CSRFMiddleware, secret_key="test-secret")
+        async def check_csrf_app(scope, receive, send):
+            status = 403 if scope.get("_csrf_error") else 200
+            body = b'{"detail": "CSRF token missing or invalid."}' if status == 403 else b'{"ok": true}'
+            content_type = b"application/json"
+            await send({
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", content_type),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
 
-        @app.post("/action")
-        async def action():
-            return {"ok": True}
+        mw = CSRFMiddleware(check_csrf_app, secret_key="test-secret")
 
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=mw), base_url="http://test") as client:
             res = await client.post("/action")
             assert res.status_code == 403
             assert "CSRF" in res.json()["detail"]
@@ -980,6 +989,60 @@ class TestCSRFMiddleware:
 
         await middleware(scope, receive, send)
         assert captured_scope.get("_csrf_token") == token
+
+    @pytest.mark.anyio
+    async def test_csrf_graceful_fallback_on_failure(self):
+        """When CSRF fails, app receives scope with _csrf_error=True and fresh token."""
+        from fenrir.middleware import CSRFMiddleware
+
+        captured_scope = {}
+        captured_headers = []
+
+        async def app(scope, receive, send):
+            captured_scope.update(scope)
+            body = b'{"detail": "CSRF failed"}'
+            await send({
+                "type": "http.response.start",
+                "status": 403,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+
+        middleware = CSRFMiddleware(app=app, secret_key="test-secret")
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/action",
+            "headers": [
+                (b"x-csrf-token", b"invalid-token"),
+                (b"cookie", b"_csrf_token=wrong-token"),
+            ],
+        }
+
+        messages = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(msg):
+            messages.append(msg)
+
+        await middleware(scope, receive, send)
+        # App receives _csrf_error=True
+        assert captured_scope.get("_csrf_error") is True
+        # Fresh token is set
+        assert captured_scope.get("_csrf_token") is not None
+        assert len(captured_scope["_csrf_token"]) > 10
+        # New cookie is set with the fresh token
+        start_msg = [m for m in messages if m["type"] == "http.response.start"][0]
+        cookie_headers = [v for n, v in start_msg["headers"] if n == b"set-cookie"]
+        assert len(cookie_headers) == 1
+        assert b"_csrf_token=" in cookie_headers[0]
+        assert b"Max-Age=604800" in cookie_headers[0]
 
 
 # =========================================================================

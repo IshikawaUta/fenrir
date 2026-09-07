@@ -426,6 +426,7 @@ class TestCSRF:
     @pytest.mark.anyio
     async def test_unsafe_missing_token(self):
         sent = []
+        captured_scope = {}
 
         async def send(msg):
             sent.append(msg)
@@ -434,11 +435,16 @@ class TestCSRF:
             return {}
 
         async def inner(scope, receive, send):
-            pass
+            captured_scope.update(scope)
+            status = 403 if scope.get("_csrf_error") else 200
+            await send({"type": "http.response.start", "status": status, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
 
         mw = CSRFMiddleware(inner, secret_key="s")
         scope = _scope("http", "POST", headers=[(b"cookie", b"foo=1; bar=2")])
         await mw(scope, receive, send)
+        assert captured_scope.get("_csrf_error") is True
+        assert captured_scope.get("_csrf_token") is not None
         assert sent[0]["status"] == 403
 
 

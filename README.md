@@ -113,7 +113,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("demo")
 
 # Initialize App
-app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.3.3")
+app = Fenrir(title="Fenrir Hybrid Framework Demo", version="4.4.0")
 
 # --- Enable Built-in Features ---
 # Monitoring Dashboard: /monitoring (login: admin/changeme)
@@ -241,7 +241,7 @@ if __name__ == "__main__":
 
 ## 🔺 Trie-Based Routing
 
-Fenrir v4.3.3 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
+Fenrir v4.4.0 uses a trie-based routing index for O(k) route matching, where k is the path depth. This is significantly faster than linear O(n) matching when you have many routes.
 
 ```python
 from fenrir import Fenrir
@@ -793,7 +793,7 @@ Check health of a specific site: `{"url": "http://example.com"}`
 
 ## 🧪 Comprehensive Test Suite
 
-Fenrir is thoroughly covered by an automated test suite comprising **2,361 tests** (plus 6 intentional skips) validating every single component: trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard, dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, CLI tooling, and the built-in monitoring dashboard.
+Fenrir is thoroughly covered by an automated test suite comprising **2,362 tests** (plus 6 intentional skips) validating every single component: trie-based routing, streaming body, connection pooling, HTTP/2 push, WebSocket authentication, rate limiting, HTTP digest/OAuth2/OpenID security schemes, PATCH/PUT/DELETE routing, lifespan handling, CSRF auto-token generation, streaming GZip compression, monitoring dashboard, dev mode debug page, ASGI middleware error handling, plugin system, hook system, lightweight ORM, caching system, queue/job system, GraphQL support, gRPC support, performance optimization module, CLI tooling, and the built-in monitoring dashboard.
 
 **Coverage**: **99%** overall (8,234 statements, 2,814 branches) — every `fenrir` module at 100%. The suite runs automatically via **GitHub Actions** on every push across Python **3.8 – 3.13**, with ruff linting, mypy type-checking, and the coverage report uploaded to **Codecov**.
 
@@ -805,7 +805,7 @@ PYTHONPATH=. pytest -q
 
 ### Output:
 ```text
-=============================== 2361 passed, 6 skipped in 491.91s (0:08:11) ================================
+=============================== 2362 passed, 6 skipped in 458.59s (0:07:38) ================================
 ```
 
 ### Performance & Benchmarking

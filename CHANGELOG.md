@@ -1,5 +1,11 @@
 # 🔄 Changelog
 
+### v4.4.0 — CSRF Graceful Fallback
+
+**Improvements:**
+- **CSRF graceful fallback** (`middleware.py`): When CSRF validation fails on POST/PUT/DELETE, the request is forwarded to the downstream app with `scope["_csrf_error"] = True` and a fresh CSRF token — previously returned a hard 403 JSON error, preventing apps from rendering retry forms with a new token
+- Apps can now check `scope.get("_csrf_error")` to detect CSRF failures and render appropriate error pages with a valid CSRF token for the user to retry
+
 ### v4.3.3 — CSRF Cookie Expiry
 
 **Improvements:**

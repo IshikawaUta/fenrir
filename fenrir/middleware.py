@@ -802,16 +802,29 @@ class CSRFMiddleware:
                 pass
 
         if not header_token or not cookie_token or not secrets.compare_digest(header_token, cookie_token) or not self._verify_token(header_token):
-            body_resp = json_dumps({"detail": "CSRF token missing or invalid."})
-            await send({
-                "type": "http.response.start",
-                "status": 403,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body_resp)).encode("latin-1")),
-                ],
-            })
-            await send({"type": "http.response.body", "body": body_resp.encode("utf-8")})
+            new_token = self._generate_token()
+            scope["_csrf_token"] = new_token
+            scope["_csrf_error"] = True
+
+            async def send_with_new_csrf(message: Dict[str, Any]) -> None:
+                if message["type"] == "http.response.start":
+                    headers = list(message.get("headers", []))
+                    cookie_val = f"{self.cookie_name}={new_token}; Path=/; SameSite=Lax; Max-Age=604800".encode("latin-1")
+                    headers.append((b"set-cookie", cookie_val))
+                    message["headers"] = headers
+                await send(message)
+
+            fail_idx = 0
+            async def fail_replay():
+                nonlocal fail_idx
+                if fail_idx >= len(body_chunks):
+                    return {"type": "http.disconnect"}
+                chunk = body_chunks[fail_idx]
+                more = fail_idx < len(body_chunks) - 1
+                fail_idx += 1
+                return {"type": "http.request", "body": chunk, "more_body": more}
+
+            await self.app(scope, fail_replay, send_with_new_csrf)
             return
 
         scope["_csrf_token"] = header_token
