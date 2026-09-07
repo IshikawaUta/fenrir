@@ -1,5 +1,10 @@
 # 🔄 Changelog
 
+### v4.3.3 — CSRF Cookie Expiry
+
+**Improvements:**
+- **CSRF cookie expiry** (`middleware.py`): CSRF token cookie now includes `Max-Age=604800` (7 days) — previously cookie had no expiry, lasting indefinitely until browser close
+
 ### v4.3.2 — CSRF Token Scope Fix
 
 **Bug Fixes:**
