@@ -724,7 +724,7 @@ class CSRFMiddleware:
                 async def send_with_csrf(message: Dict[str, Any]) -> None:
                     if message["type"] == "http.response.start":
                         headers = list(message.get("headers", []))
-                        cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax".encode("latin-1")
+                        cookie_val = f"{self.cookie_name}={token}; Path=/; SameSite=Lax; Max-Age=604800".encode("latin-1")
                         headers.append((b"set-cookie", cookie_val))
                         message["headers"] = headers
                     await send(message)
